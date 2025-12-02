@@ -1,0 +1,5 @@
+data/all_shen_roi_ts/*
+data/ldw_data
+
+/results_gat_interpretable
+data/folds_data
