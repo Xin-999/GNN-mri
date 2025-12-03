@@ -34,7 +34,7 @@ SEED = 42
 BATCH_SIZE = 32
 LR = 1e-3
 WEIGHT_DECAY = 1e-4
-EPOCHS = 50
+EPOCHS = 20
 USE_GLOBAL_ATTENTION_POOL = True  # if False, use simple mean pooling
 
 
