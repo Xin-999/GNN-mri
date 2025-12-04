@@ -1,42 +1,52 @@
 #!/usr/bin/env python
 """
-train_gatv2_interpretable.py
+train_gatv2_grid.py
 
-Train an interpretable GATv2-based GNN on Movie-HCP Ledoit-Wolf graphs.
+Train an interpretable GATv2-based GNN on Movie-HCP Ledoit-Wolf graphs
+with a small hyperparameter grid search.
 
 - Loads all CV folds (graphs_outer*_inner*.pkl).
 - Flattens [subject, window] arrays into a list of PyG Data objects.
 - Drops padding windows.
 - Attaches subject_id to each window graph.
-- Trains a GATv2 regressor to predict cognitive scores.
-- Reports both window-level and subject-level metrics.
-- Saves the best model (per fold) based on subject-level validation MSE.
+- For each config in HYPERPARAM_GRID:
+    - Trains a GATv2 regressor across all folds.
+    - Uses subject-level validation MSE for early stopping within each fold.
+    - Records subject-level validation r and test r.
+- After all configs and folds, reports the best config based on
+  mean validation subject-level r across folds.
 """
 
 import os
 import json
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import time 
+import time
 
 from torch_geometric.loader import DataLoader
 from torch_geometric.nn import GATv2Conv, GlobalAttention, global_mean_pool
 from typing import List, Any
 
 # ----------------------------
-# 1. Config
+# 1. Config & hyperparameter grid
 # ----------------------------
 
-OUTPUT_DIR = "results_gatv2_interpretable"
+OUTPUT_DIR = "results_gatv2_grid"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 SEED = 42
 BATCH_SIZE = 32
-LR = 1e-3
-WEIGHT_DECAY = 1e-4
 EPOCHS = 20
 USE_GLOBAL_ATTENTION_POOL = True  # if False, use simple mean pooling
+
+# 👉 You can edit this grid however you like
+HYPERPARAM_GRID = [
+    {"hidden_dim": 32, "heads1": 2, "lr": 1e-3, "weight_decay": 1e-4},
+    {"hidden_dim": 64, "heads1": 2, "lr": 1e-3, "weight_decay": 1e-4},
+    {"hidden_dim": 32, "heads1": 4, "lr": 5e-4, "weight_decay": 1e-4},
+]
 
 
 # ----------------------------
@@ -44,7 +54,6 @@ USE_GLOBAL_ATTENTION_POOL = True  # if False, use simple mean pooling
 # ----------------------------
 
 def set_seed(seed: int = 42):
-    import numpy as np
     import random
     random.seed(seed)
     np.random.seed(seed)
@@ -82,11 +91,8 @@ def load_fold(path: str, weights_only: bool = False):
     Load one fold file and return flat lists of train/val/test graphs.
     """
     print(f"Loading fold from {path}")
-    # Torch 2.6 defaulted torch.load to weights_only=True, but these fold files
-    # store full Python objects (PyG Data). Force weights_only=False for compatibility.
     graphs = torch.load(path, map_location="cpu", weights_only=weights_only)
 
-    # The keys in your step2 script are 'train_graphs', 'test_graphs', 'val_graphs'
     train_2d = graphs["train_graphs"]
     val_2d   = graphs["val_graphs"]
     test_2d  = graphs["test_graphs"]
@@ -112,21 +118,17 @@ class GATv2Regressor(nn.Module):
     - Two GATv2Conv layers (edge-level attention).
     - Global attention pooling for node importance (optional).
     - MLP head for regression.
-
-    Helper methods:
-    - get_edge_attention(data)
-    - get_node_importance(data)
     """
 
-    def __init__(self, in_dim: int, hidden_dim: int = 32, out_dim: int = 1,
-                 use_global_attention_pool: bool = True):
+    def __init__(self, in_dim: int, hidden_dim: int = 32, heads1: int = 2,
+                 out_dim: int = 1, use_global_attention_pool: bool = True):
         super().__init__()
 
-        # You can bump these if you want a bigger model
-        heads1 = 2  # multi-head on first layer
+        # First GATv2 layer
         self.gat1 = GATv2Conv(in_dim, hidden_dim, heads=heads1, concat=True)
         gat1_out_dim = hidden_dim * heads1
 
+        # Second GATv2 layer (single head)
         self.gat2 = GATv2Conv(gat1_out_dim, hidden_dim, heads=1, concat=True)
 
         self.use_global_attention_pool = use_global_attention_pool
@@ -159,64 +161,6 @@ class GATv2Regressor(nn.Module):
         x = self.lin1(x).relu()
         out = self.lin2(x).squeeze(-1)  # [batch_size]
         return out
-
-    @torch.no_grad()
-    def get_edge_attention(self, data):
-        """
-        Returns attention weights per edge for a *single* graph.
-
-        data: PyG Data (batch dimension = 1 or no batch)
-        Returns:
-            edge_index: [2, E]
-            alpha:      [E] attention coefficients from second GATv2 layer
-        """
-        self.eval()
-        device = next(self.parameters()).device
-
-        # Ensure it has batch attr
-        if not hasattr(data, "batch"):
-            data.batch = torch.zeros(data.num_nodes, dtype=torch.long)
-
-        data = data.to(device)
-        # First GATv2 (we don't need its alphas here)
-        x = self.gat1(data.x, data.edge_index).relu()
-
-        # Second GATv2 with attention weights
-        _, (edge_index, alpha) = self.gat2(
-            x,
-            data.edge_index,
-            return_attention_weights=True
-        )
-        # alpha shape: [E, heads], but we used heads=1, so squeeze
-        alpha = alpha.squeeze(-1).detach().cpu()
-        edge_index = edge_index.detach().cpu()
-        return edge_index, alpha
-
-    @torch.no_grad()
-    def get_node_importance(self, data):
-        """
-        Approximate node importance using the gate values from GlobalAttention.
-
-        Returns:
-            node_scores: [num_nodes] tensor with unnormalized attention scores per node.
-        """
-        if not self.use_global_attention_pool:
-            raise RuntimeError("GlobalAttention pooling is disabled; cannot compute node importance.")
-
-        self.eval()
-        device = next(self.parameters()).device
-
-        if not hasattr(data, "batch"):
-            data.batch = torch.zeros(data.num_nodes, dtype=torch.long)
-
-        data = data.to(device)
-        x = self.gat1(data.x, data.edge_index).relu()
-        x = self.gat2(x, data.edge_index).relu()
-
-        # gate_nn gives scalar per node → attention logits
-        gate_values = self.gate_nn(x)  # [N, 1]
-        node_scores = gate_values.squeeze(-1).detach().cpu()
-        return node_scores
 
 
 # ----------------------------
@@ -277,11 +221,9 @@ def eval_epoch(model, loader, device):
         all_preds.append(preds.cpu())
         all_targets.append(target.cpu())
 
-        # subject_id was attached in flatten_and_filter
         if hasattr(batch, "subject_id"):
             all_subject_ids.append(batch.subject_id.cpu())
         else:
-            # Fallback: dummy IDs (shouldn't happen if flatten_and_filter set them)
             all_subject_ids.append(torch.arange(batch.num_graphs))
 
     if num_samples == 0:
@@ -314,12 +256,10 @@ def eval_epoch(model, loader, device):
         subj_pred[sid].append(p.item())
         subj_true[sid].append(t.item())
 
-    # average per subject
     subj_pred_avg = []
     subj_true_avg = []
     for sid in subj_pred.keys():
         subj_pred_avg.append(sum(subj_pred[sid]) / len(subj_pred[sid]))
-        # target should be same for all windows; average for safety
         subj_true_avg.append(sum(subj_true[sid]) / len(subj_true[sid]))
 
     subj_pred_avg = torch.tensor(subj_pred_avg)
@@ -338,8 +278,15 @@ def eval_epoch(model, loader, device):
     return mse_win, r_win, mse_subj, r_subj
 
 
+# ----------------------------
+# 5. Main: grid search over configs
+# ----------------------------
+
 def main():
     set_seed(SEED)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print("Using device:", device)
 
     fold_dir = "data/folds_data"
     fold_files = sorted(
@@ -348,104 +295,138 @@ def main():
         if f.startswith("graphs_outer") and f.endswith(".pkl")
     )
 
-    all_test_results = []
+    all_config_summaries = []
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print("Using device:", device)
+    for cfg_idx, cfg in enumerate(HYPERPARAM_GRID):
+        print("\n====================================")
+        print(f"Config {cfg_idx}: {cfg}")
+        print("====================================")
 
-    for fold_path in fold_files:
-        print("\n==============================")
-        print("Training on fold:", fold_path)
-        print("==============================")
+        cfg_val_r_subj_list = []
+        cfg_test_r_subj_list = []
 
-        # 1) Load data from THIS fold
-        train_graphs, val_graphs, test_graphs = load_fold(fold_path)
+        for fold_path in fold_files:
+            print("\n------------------------------")
+            print("Training on fold:", fold_path)
+            print("------------------------------")
 
-        # 2) Dataloaders (for this fold)
-        in_dim = train_graphs[0].x.size(-1)
-        print(f"Node feature dim: {in_dim}")
+            train_graphs, val_graphs, test_graphs = load_fold(fold_path)
 
-        train_loader = DataLoader(
-            train_graphs, batch_size=BATCH_SIZE, shuffle=True,
-            num_workers=0, pin_memory=torch.cuda.is_available()
-        )
-        val_loader   = DataLoader(
-            val_graphs, batch_size=BATCH_SIZE, shuffle=False,
-            num_workers=0, pin_memory=torch.cuda.is_available()
-        )
-        test_loader  = DataLoader(
-            test_graphs, batch_size=BATCH_SIZE, shuffle=False,
-            num_workers=0, pin_memory=torch.cuda.is_available()
-        )
+            in_dim = train_graphs[0].x.size(-1)
+            print(f"Node feature dim: {in_dim}")
 
-        # 3) Fresh model + optimizer for THIS fold
-        model = GATv2Regressor(
-            in_dim=in_dim,
-            hidden_dim=32,  # bump to 64 if you want larger model
-            out_dim=1,
-            use_global_attention_pool=USE_GLOBAL_ATTENTION_POOL,
-        ).to(device)
-        optimizer = optim.Adam(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
-
-        best_val_loss = float("inf")
-        best_state = None
-
-        for epoch in range(1, EPOCHS + 1):
-            t0 = time.perf_counter()
-            train_loss = train_one_epoch(model, train_loader, optimizer, device)
-            val_mse_win, val_r_win, val_mse_subj, val_r_subj = eval_epoch(model, val_loader, device)
-            epoch_sec = time.perf_counter() - t0
-            print(
-                f"[{os.path.basename(fold_path)}] "
-                f"Epoch {epoch:03d} | train MSE={train_loss:.4f} | "
-                f"val_win MSE={val_mse_win:.4f} | val_win r={val_r_win:.3f} | "
-                f"val_subj MSE={val_mse_subj:.4f} | val_subj r={val_r_subj:.3f} |" 
-                f"time={epoch_sec:.2f}s"
+            train_loader = DataLoader(
+                train_graphs, batch_size=BATCH_SIZE, shuffle=True,
+                num_workers=0, pin_memory=torch.cuda.is_available()
+            )
+            val_loader   = DataLoader(
+                val_graphs, batch_size=BATCH_SIZE, shuffle=False,
+                num_workers=0, pin_memory=torch.cuda.is_available()
+            )
+            test_loader  = DataLoader(
+                test_graphs, batch_size=BATCH_SIZE, shuffle=False,
+                num_workers=0, pin_memory=torch.cuda.is_available()
             )
 
-            # Use subject-level MSE as the criterion for "best" model
-            if val_mse_subj < best_val_loss:
-                best_val_loss = val_mse_subj
-                best_state = model.state_dict()
+            model = GATv2Regressor(
+                in_dim=in_dim,
+                hidden_dim=cfg["hidden_dim"],
+                heads1=cfg["heads1"],
+                out_dim=1,
+                use_global_attention_pool=USE_GLOBAL_ATTENTION_POOL,
+            ).to(device)
 
-        # Use best model for test
-        if best_state is not None:
-            model.load_state_dict(best_state)
+            optimizer = optim.Adam(
+                model.parameters(),
+                lr=cfg["lr"],
+                weight_decay=cfg["weight_decay"]
+            )
 
-        test_mse_win, test_r_win, test_mse_subj, test_r_subj = eval_epoch(model, test_loader, device)
-        print(
-            f"[{os.path.basename(fold_path)}] "
-            f"Test window  MSE: {test_mse_win:.4f} | Test window  r: {test_r_win:.3f} | "
-            f"Test subject MSE: {test_mse_subj:.4f} | Test subject r: {test_r_subj:.3f}"
-        )
+            best_val_loss = float("inf")
+            best_state = None
 
-        # Save best model for this fold
-        fold_name = os.path.basename(fold_path).replace(".pkl", "")
-        model_path = os.path.join(OUTPUT_DIR, f"gatv2_best_{fold_name}.pt")
-        if best_state is not None:
-            torch.save(best_state, model_path)
-            print(f"Saved best model for {fold_name} to {model_path}")
+            for epoch in range(1, EPOCHS + 1):
+                t0 = time.perf_counter()    
+                train_loss = train_one_epoch(model, train_loader, optimizer, device)
+                val_mse_win, val_r_win, val_mse_subj, val_r_subj = eval_epoch(model, val_loader, device)
+                epoch_sec = time.perf_counter() - t0
+                print(
+                    f"[cfg{cfg_idx} | {os.path.basename(fold_path)}] "
+                    f"Epoch {epoch:03d} | train MSE={train_loss:.4f} | "
+                    f"val_win MSE={val_mse_win:.4f} | val_win r={val_r_win:.3f} | "
+                    f"val_subj MSE={val_mse_subj:.4f} | val_subj r={val_r_subj:.3f} |" 
+                    f"time={epoch_sec:.2f}s"
+                )
 
-        all_test_results.append(
-            {
-                "fold": os.path.basename(fold_path),
-                "test_mse_win": test_mse_win,
-                "test_r_win": test_r_win,
-                "test_mse_subj": test_mse_subj,
-                "test_r_subj": test_r_subj,
-            }
-        )
+                # Early stopping criterion: subject-level validation MSE
+                if val_mse_subj < best_val_loss:
+                    best_val_loss = val_mse_subj
+                    best_state = model.state_dict()
 
-    # summarize over folds
-    print("\n=== Summary over folds ===")
-    for res in all_test_results:
-        print(res)
+            # Reload best model for this fold
+            if best_state is not None:
+                model.load_state_dict(best_state)
 
-    # optionally save JSON summary
-    summary_path = os.path.join(OUTPUT_DIR, "gatv2_test_summary.json")
+            # Recompute val metrics at best epoch
+            val_mse_win, val_r_win, val_mse_subj, val_r_subj = eval_epoch(model, val_loader, device)
+            # And compute test metrics
+            test_mse_win, test_r_win, test_mse_subj, test_r_subj = eval_epoch(model, test_loader, device)
+
+            print(
+                f"[cfg{cfg_idx} | {os.path.basename(fold_path)}] "
+                f"BEST val_subj MSE={val_mse_subj:.4f} | BEST val_subj r={val_r_subj:.3f}"
+            )
+            print(
+                f"[cfg{cfg_idx} | {os.path.basename(fold_path)}] "
+                f"Test window  MSE: {test_mse_win:.4f} | Test window  r: {test_r_win:.3f} | "
+                f"Test subject MSE: {test_mse_subj:.4f} | Test subject r: {test_r_subj:.3f}"
+            )
+
+            # Save best model for this config+fold
+            fold_name = os.path.basename(fold_path).replace(".pkl", "")
+            model_path = os.path.join(OUTPUT_DIR, f"gatv2_cfg{cfg_idx}_best_{fold_name}.pt")
+            if best_state is not None:
+                torch.save(best_state, model_path)
+                print(f"Saved best model for config {cfg_idx}, fold {fold_name} to {model_path}")
+
+            cfg_val_r_subj_list.append(val_r_subj)
+            cfg_test_r_subj_list.append(test_r_subj)
+
+        # Aggregate over folds
+        mean_val_r_subj = float(np.nanmean(cfg_val_r_subj_list))
+        mean_test_r_subj = float(np.nanmean(cfg_test_r_subj_list))
+
+        cfg_summary = {
+            "config_id": cfg_idx,
+            "hidden_dim": cfg["hidden_dim"],
+            "heads1": cfg["heads1"],
+            "lr": cfg["lr"],
+            "weight_decay": cfg["weight_decay"],
+            "mean_val_r_subj": mean_val_r_subj,
+            "mean_test_r_subj": mean_test_r_subj,
+            "per_fold_val_r_subj": cfg_val_r_subj_list,
+            "per_fold_test_r_subj": cfg_test_r_subj_list,
+        }
+
+        all_config_summaries.append(cfg_summary)
+        print("\n===== Config", cfg_idx, "summary =====")
+        print(cfg_summary)
+
+    # Choose best config by mean validation subject-level r
+    mean_val_rs = [c["mean_val_r_subj"] for c in all_config_summaries]
+    best_idx = int(np.nanargmax(mean_val_rs))
+    best_cfg = all_config_summaries[best_idx]
+
+    print("\n==============================")
+    print("BEST CONFIG (by mean val_subj r):")
+    print(best_cfg)
+    print("==============================")
+
+    # Save all configs summary to JSON
+    summary_path = os.path.join(OUTPUT_DIR, "gatv2_grid_summary.json")
     with open(summary_path, "w") as f:
-        json.dump(all_test_results, f, indent=2)
-    print(f"\nSaved summary to {summary_path}")
+        json.dump(all_config_summaries, f, indent=2)
+    print(f"\nSaved grid search summary to {summary_path}")
 
 
 if __name__ == "__main__":
