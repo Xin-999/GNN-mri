@@ -1,0 +1,196 @@
+# %%
+# #!/usr/bin/env python3
+"""
+plot_corr_matrix.py
+
+Load a Shen-268 ROI time-series .txt file and plot its ROI-ROI correlation matrix.
+"""
+
+import argparse
+from pathlib import Path
+import os
+import matplotlib
+
+import numpy as np
+from sklearn.covariance import ledoit_wolf
+
+plt = None  # set after backend configuration
+
+TS_PATH = r"c:\Users\USER\Documents\InternQX\Movie-HCP_Brain_Graph-master\data\all_shen_roi_ts\100610_MOVIE2_7T_AP_shen268_roi_ts_gsr.txt"
+
+
+def cov2corr(covariance: np.ndarray) -> np.ndarray:
+    """
+    Convert covariance matrix to correlation matrix.
+    Same as in step1_compute_ldw.py.
+    """
+    v = np.sqrt(np.diag(covariance))
+    outer_v = np.outer(v, v)
+    corr = covariance / outer_v
+    corr[covariance == 0] = 0
+    return corr
+
+
+def compute_corr(ts: np.ndarray, method: str = "pearson") -> np.ndarray:
+    """
+    Compute ROI-ROI correlation from time-series.
+
+    ts: array of shape (T, N_ROI)
+    method: "pearson" or "ldw" (Ledoit-Wolf covariance + correlation)
+    """
+    if ts.ndim != 2:
+        raise ValueError(f"Expected 2D array (T, N_ROI), got shape {ts.shape}")
+
+    if method == "pearson":
+        # np.corrcoef expects variables in rows if rowvar=True
+        # Our ts shape is (T, N_ROI) -> set rowvar=False
+        corr = np.corrcoef(ts, rowvar=False)
+    elif method == "ldw":
+        cov, _ = ledoit_wolf(ts, assume_centered=False)
+        corr = cov2corr(cov)
+    else:
+        raise ValueError(f"Unknown method: {method}")
+
+    return corr
+
+
+def _in_notebook() -> bool:
+    """Return True if running inside an IPython/Jupyter kernel."""
+    try:
+        from IPython import get_ipython  # type: ignore
+        ip = get_ipython()
+        if ip is None:
+            return False
+        return getattr(ip, "kernel", None) is not None or "IPKernelApp" in ip.config
+    except Exception:
+        return False
+
+
+def configure_backend(prefer_show: bool) -> None:
+    """
+    Choose a matplotlib backend:
+    - If MPLBACKEND is set, respect it.
+    - If in a notebook and ipympl is installed, use the ipympl backend.
+    - Else, if show is requested, try a GUI backend (Tk/Qt) if available.
+    - Fallback to Agg for headless saves.
+    """
+    if os.environ.get("MPLBACKEND"):
+        return
+
+    if _in_notebook():
+        try:
+            import ipympl  # noqa: F401
+            matplotlib.use("module://ipympl.backend_nbagg")
+            return
+        except ImportError:
+            pass
+
+    if prefer_show:
+        for cand in ("TkAgg", "Qt5Agg", "QtAgg"):
+            try:
+                matplotlib.use(cand)
+                return
+            except Exception:
+                continue
+
+    matplotlib.use("Agg")
+
+
+def plot_corr(corr: np.ndarray, title: str = "", output_path: Path | None = None, show: bool = False):
+    """Plot a correlation matrix, save it, and optionally show a GUI window."""
+    fig, ax = plt.subplots(figsize=(6, 5))
+
+    im = ax.imshow(corr, vmin=-1, vmax=1)
+
+    ax.set_title(title if title else "ROI Correlation Matrix")
+    ax.set_xlabel("ROI index")
+    ax.set_ylabel("ROI index")
+
+    # Optional: show fewer ticks to avoid clutter
+    n_roi = corr.shape[0]
+    tick_step = max(1, n_roi // 10)
+    ticks = np.arange(0, n_roi, tick_step)
+    ax.set_xticks(ticks)
+    ax.set_yticks(ticks)
+
+    cbar = fig.colorbar(im, ax=ax)
+    cbar.set_label("Correlation")
+
+    fig.tight_layout()
+
+    if output_path is None:
+        output_path = Path("corr_matrix.png")
+    else:
+        output_path = Path(output_path)
+    fig.savefig(output_path, dpi=300, bbox_inches="tight")
+    print(f"Saved figure to {output_path.resolve()}")
+
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Plot ROI-ROI correlation matrix from Shen-268 time-series .txt file."
+    )
+    parser.add_argument(
+        "ts_path",
+        type=str,
+        help="Path to the time-series .txt file (T x 268).",
+    )
+    parser.add_argument(
+        "--method",
+        choices=["pearson", "ldw"],
+        default="pearson",
+        help="Correlation method: 'pearson' or 'ldw' (Ledoit-Wolf covariance + correlation).",
+    )
+    parser.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help="Path to save the correlation heatmap (default: <ts_name>_<method>_corr.png).",
+    )
+    parser.add_argument(
+        "--show",
+        action="store_true",
+        help="Also show the plot in a GUI window (requires interactive backend).",
+    )
+
+    args = parser.parse_args()
+    ts_path = Path(args.ts_path)
+
+    configure_backend(prefer_show=args.show)
+    global plt  # noqa: PLW0603
+    import matplotlib.pyplot as plt  # type: ignore
+
+    if not ts_path.exists():
+        raise FileNotFoundError(f"File not found: {ts_path}")
+
+    print(f"Loading time-series from {ts_path} ...")
+    ts = np.loadtxt(ts_path)
+
+    # If the file accidentally comes as (268, T), transpose
+    if ts.shape[0] == 268 and ts.shape[1] != 268:
+        ts = ts.T
+
+    print(f"Time-series shape: {ts.shape} (T x N_ROI)")
+
+    corr = compute_corr(ts, method=args.method)
+    print("Correlation matrix shape:", corr.shape)
+
+    title = f"{ts_path.stem} ({args.method} correlation)"
+
+    if args.output is None:
+        output_path = ts_path.with_name(f"{ts_path.stem}_{args.method}_corr.png")
+    else:
+        output_path = Path(args.output)
+
+    plot_corr(corr, title=title, output_path=output_path, show=args.show)
+
+
+if __name__ == "__main__":
+    main()
+
+# %%
