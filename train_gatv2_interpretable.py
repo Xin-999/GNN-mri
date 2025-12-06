@@ -15,10 +15,11 @@ Train an interpretable GATv2-based GNN on Movie-HCP Ledoit-Wolf graphs.
 
 import os
 import json
+import time
+import argparse
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import time 
 
 from torch_geometric.loader import DataLoader
 from torch_geometric.nn import GATv2Conv, GlobalAttention, global_mean_pool
@@ -51,6 +52,23 @@ def set_seed(seed: int = 42):
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
+
+
+def select_device(arg_choice: str = "auto") -> torch.device:
+    """
+    Choose a device:
+    - auto: cuda if available else cpu
+    - cuda: require GPU, raise if unavailable
+    - cpu:  force CPU
+    """
+    if arg_choice == "cpu":
+        return torch.device("cpu")
+    if arg_choice == "cuda":
+        if not torch.cuda.is_available():
+            raise RuntimeError("CUDA requested but not available")
+        return torch.device("cuda")
+    # auto
+    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 def flatten_and_filter(arr2d) -> List[Any]:
@@ -339,6 +357,15 @@ def eval_epoch(model, loader, device):
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Train interpretable GATv2 regressor")
+    parser.add_argument(
+        "--device",
+        choices=["auto", "cuda", "cpu"],
+        default="auto",
+        help="Execution device: 'cuda' (requires GPU), 'cpu', or 'auto' (default: cuda if available)",
+    )
+    args = parser.parse_args()
+
     set_seed(SEED)
 
     fold_dir = "data/folds_data"
@@ -350,7 +377,8 @@ def main():
 
     all_test_results = []
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = select_device(args.device)
+    pin_mem = device.type == "cuda"
     print("Using device:", device)
 
     for fold_path in fold_files:
@@ -367,15 +395,15 @@ def main():
 
         train_loader = DataLoader(
             train_graphs, batch_size=BATCH_SIZE, shuffle=True,
-            num_workers=0, pin_memory=torch.cuda.is_available()
+            num_workers=0, pin_memory=pin_mem
         )
         val_loader   = DataLoader(
             val_graphs, batch_size=BATCH_SIZE, shuffle=False,
-            num_workers=0, pin_memory=torch.cuda.is_available()
+            num_workers=0, pin_memory=pin_mem
         )
         test_loader  = DataLoader(
             test_graphs, batch_size=BATCH_SIZE, shuffle=False,
-            num_workers=0, pin_memory=torch.cuda.is_available()
+            num_workers=0, pin_memory=pin_mem
         )
 
         # 3) Fresh model + optimizer for THIS fold
