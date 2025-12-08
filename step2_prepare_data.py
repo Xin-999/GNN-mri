@@ -263,6 +263,9 @@ if __name__ == "__main__":
 
     for fold_key in sorted(fold_indices.keys()):
         print(f'Processing {fold_key}...')
+        train_idx = fold_indices[fold_key]['train']
+        test_idx  = fold_indices[fold_key]['test']
+        val_idx   = fold_indices[fold_key]['val']
 
         Corr, Adj, SeqLen, Scores = get_fold_data(
             all_data_padded, all_adj_padded, seqlengths, cognitive_scores, fold_indices, 'train', fold_key
@@ -282,7 +285,11 @@ if __name__ == "__main__":
         graphs = {
             'train_graphs': train_graphs,
             'test_graphs': test_graphs,
-            'val_graphs': val_graphs
+            'val_graphs': val_graphs,
+
+            'train_indices': train_idx,
+            'test_indices':  test_idx,
+            'val_indices':   val_idx,
         }
 
         print('Saving graphs...')
