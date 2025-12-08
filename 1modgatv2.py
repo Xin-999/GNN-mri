@@ -106,7 +106,6 @@ def flatten_and_filter(arr2d) -> List[Any]:
             flat.append(g)
     return flat
 
-
 def load_fold(path: str, weights_only: bool = False):
     """
     Load one fold file and return flat lists of train/val/test graphs.
