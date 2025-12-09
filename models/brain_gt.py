@@ -181,10 +181,10 @@ class LocalGNNLayer(nn.Module):
     Uses GATv2 for better expressiveness.
     """
 
-    def __init__(self, in_dim: int, out_dim: int, heads: int = 4, dropout: float = 0.1):
+    def __init__(self, in_dim: int, out_dim: int, heads: int = 4, dropout: float = 0.1, edge_dim: int = 1):
         super().__init__()
         self.gat = GATv2Conv(
-            in_dim, out_dim // heads, heads=heads, dropout=dropout, concat=True
+            in_dim, out_dim // heads, heads=heads, dropout=dropout, concat=True, edge_dim=edge_dim
         )
         self.norm = nn.LayerNorm(out_dim)
 
