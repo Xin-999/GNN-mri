@@ -15,7 +15,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.nn import MessagePassing, global_mean_pool, global_add_pool
 from torch_geometric.utils import add_self_loops, softmax
-from torch_scatter import scatter_add
 import math
 from typing import Optional, Tuple
 
@@ -170,10 +169,8 @@ class ROIPool(nn.Module):
 
         # Get number of nodes per graph
         batch_size = batch.max().item() + 1
-        num_nodes_per_graph = scatter_add(
-            torch.ones_like(batch, dtype=torch.float),
-            batch, dim=0, dim_size=batch_size
-        )
+        # torch_scatter is an optional dependency; torch.bincount gives the same counts here
+        num_nodes_per_graph = torch.bincount(batch, minlength=batch_size).float()
 
         # Select top-k nodes per graph
         k_per_graph = torch.clamp(
