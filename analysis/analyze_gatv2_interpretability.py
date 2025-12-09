@@ -37,15 +37,22 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # Import model architectures
-try:
-    from train_gatv2_improved import ImprovedGATv2Regressor
-except:
-    print("Warning: Could not import ImprovedGATv2Regressor")
+# Add training directory to path
+import sys
+training_dir = Path(__file__).parent.parent / "training" / "gatv2"
+sys.path.insert(0, str(training_dir))
 
 try:
-    from train_gatv2_interpretable import GATv2Regressor
-except:
-    print("Warning: Could not import GATv2Regressor")
+    from train_gatv2_improved import ImprovedGATv2Regressor
+except Exception as e:
+    print(f"Warning: Could not import ImprovedGATv2Regressor: {e}")
+    ImprovedGATv2Regressor = None
+
+try:
+    from train_gatv2_basic import GATv2Regressor
+except Exception as e:
+    print(f"Warning: Could not import GATv2Regressor: {e}")
+    GATv2Regressor = None
 
 
 # ----------------------------
@@ -73,8 +80,18 @@ def load_model_and_data(model_dir, fold_name, device='cpu'):
     print(f"Loading model from {model_path}")
     checkpoint = torch.load(model_path, map_location=device, weights_only=False)
 
-    config = checkpoint.get('config', {})
-    scaler = checkpoint.get('scaler', None)
+    # Handle both old format (state_dict only) and new format (with config, scaler, etc.)
+    if 'model_state_dict' in checkpoint:
+        # New format
+        config = checkpoint.get('config', {})
+        scaler = checkpoint.get('scaler', None)
+        state_dict = checkpoint['model_state_dict']
+    else:
+        # Old format - checkpoint IS the state_dict
+        config = {}
+        scaler = None
+        state_dict = checkpoint
+        print("Warning: Old checkpoint format detected (no config/scaler)")
 
     # Load test data
     fold_data_path = Path(f"../../data/folds_data/{fold_name}.pkl")
@@ -103,27 +120,44 @@ def load_model_and_data(model_dir, fold_name, device='cpu'):
     # Create model
     in_dim = test_graphs[0].x.size(-1)
 
-    # Try different model architectures
-    try:
-        model = ImprovedGATv2Regressor(
-            in_dim=in_dim,
-            hidden_dim=config.get('hidden_dim', 64),
-            n_layers=config.get('n_layers', 3),
-            n_heads=config.get('n_heads', 4),
-            dropout=config.get('dropout', 0.2),
-            edge_dropout=config.get('edge_dropout', 0.1),
-        )
-    except:
+    # Try different model architectures - try loading weights to verify compatibility
+    model = None
+    model_name = None
+
+    # Try ImprovedGATv2Regressor first
+    if ImprovedGATv2Regressor is not None:
         try:
-            model = GATv2Regressor(
+            temp_model = ImprovedGATv2Regressor(
+                in_dim=in_dim,
+                hidden_dim=config.get('hidden_dim', 64),
+                n_layers=config.get('n_layers', 3),
+                n_heads=config.get('n_heads', 4),
+                dropout=config.get('dropout', 0.2),
+                edge_dropout=config.get('edge_dropout', 0.1),
+            )
+            temp_model.load_state_dict(state_dict)
+            model = temp_model
+            model_name = "ImprovedGATv2Regressor"
+        except Exception as e:
+            print(f"Could not load with ImprovedGATv2Regressor: {type(e).__name__}")
+
+    # Try GATv2Regressor (basic) if improved didn't work
+    if model is None and GATv2Regressor is not None:
+        try:
+            temp_model = GATv2Regressor(
                 in_dim=in_dim,
                 hidden_dim=config.get('hidden_dim', 32),
             )
-        except:
-            raise RuntimeError("Could not create model")
+            temp_model.load_state_dict(state_dict)
+            model = temp_model
+            model_name = "GATv2Regressor"
+        except Exception as e:
+            print(f"Could not load with GATv2Regressor: {type(e).__name__}")
 
-    # Load weights
-    model.load_state_dict(checkpoint['model_state_dict'])
+    if model is None:
+        raise RuntimeError("Could not load model - no compatible architecture found")
+
+    # Move to device
     model = model.to(device)
     model.eval()
 
