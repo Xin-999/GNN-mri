@@ -141,6 +141,7 @@ class GATRegressor(nn.Module):
 
         self.lin1 = nn.Linear(hidden_dim, hidden_dim)
         self.lin2 = nn.Linear(hidden_dim, out_dim)
+        self.dropout = nn.Dropout(0.2)
 
     def forward(self, data):
         x, edge_index, batch = data.x, data.edge_index, data.batch
@@ -155,7 +156,6 @@ class GATRegressor(nn.Module):
 
         x = self.lin1(x).relu()
         x = self.dropout(x)
-        out = self.lin2(x).squeeze(-1)
         out = self.lin2(x).squeeze(-1)  # [batch_size]
         return out
 
