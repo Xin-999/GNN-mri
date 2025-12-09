@@ -19,6 +19,7 @@ Usage:
 import argparse
 import subprocess
 import sys
+import os
 import json
 from pathlib import Path
 import time
@@ -35,6 +36,13 @@ def run_command(cmd, description, cwd=None):
 
     start_time = time.time()
 
+    # Set up environment with PYTHONPATH
+    env = os.environ.copy()
+    if cwd:
+        # Add project root to PYTHONPATH so Python can find modules
+        env['PYTHONPATH'] = str(cwd)
+        print(f"PYTHONPATH: {cwd}\n")
+
     try:
         result = subprocess.run(
             cmd,
@@ -42,6 +50,7 @@ def run_command(cmd, description, cwd=None):
             capture_output=False,
             text=True,
             cwd=cwd,
+            env=env,
         )
         elapsed = time.time() - start_time
         print(f"\n✓ {description} completed in {elapsed/60:.1f} minutes")
