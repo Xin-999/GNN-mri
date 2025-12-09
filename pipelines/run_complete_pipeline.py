@@ -60,13 +60,22 @@ def generate_comparison_report(output_dir):
     results = {}
 
     for model in models:
-        result_file = Path(f"results_{model}_advanced/aggregate_results.json")
+        # Check new reorganized path
+        result_file = Path(f"../results/advanced/{model}/{model}_aggregate_summary.json")
+        if not result_file.exists():
+            # Fallback to old path
+            result_file = Path(f"results_{model}_advanced/aggregate_results.json")
+
         if result_file.exists():
             with open(result_file) as f:
                 results[model] = json.load(f)
 
     # Load ensemble results
-    ensemble_file = Path("results_ensemble/aggregate_ensemble_results.json")
+    ensemble_file = Path("../results/ensemble/aggregate_ensemble_results.json")
+    if not ensemble_file.exists():
+        # Fallback to old path
+        ensemble_file = Path("results_ensemble/aggregate_ensemble_results.json")
+
     if ensemble_file.exists():
         with open(ensemble_file) as f:
             results['ensemble'] = json.load(f)
@@ -84,25 +93,34 @@ def generate_comparison_report(output_dir):
         f.write(f"{'Model':<20} {'Mean r':<15} {'Std r':<15} {'Mean MSE':<15}\n")
         f.write("-" * 70 + "\n")
 
+        model_scores = []
         for name, data in results.items():
-            if 'mean_test_r' in data:
+            # Handle new JSON structure
+            if 'subject_level_aggregate' in data and data['subject_level_aggregate']:
+                r_mean = data['subject_level_aggregate']['r']['mean']
+                r_std = data['subject_level_aggregate']['r']['std']
+                mse_mean = data['subject_level_aggregate']['mse']['mean']
+                f.write(f"{name.upper():<20} {r_mean:<15.4f} {r_std:<15.4f} {mse_mean:<15.4f}\n")
+                model_scores.append((name, r_mean))
+            # Fallback to old structure
+            elif 'mean_test_r' in data:
                 r_mean = data['mean_test_r']
                 r_std = data.get('std_test_r', 0)
                 mse_mean = data['mean_test_mse']
                 f.write(f"{name.upper():<20} {r_mean:<15.4f} {r_std:<15.4f} {mse_mean:<15.4f}\n")
+                model_scores.append((name, r_mean))
 
         f.write("\n" + "="*70 + "\n")
         f.write("\nRecommendation:\n")
 
         if 'ensemble' in results:
             f.write("✓ Use ENSEMBLE for best accuracy\n")
-        else:
+        elif model_scores:
             # Find best single model
-            best_model = max(
-                [(name, data['mean_test_r']) for name, data in results.items() if 'mean_test_r' in data],
-                key=lambda x: x[1]
-            )
+            best_model = max(model_scores, key=lambda x: x[1])
             f.write(f"✓ Best single model: {best_model[0].upper()} (r={best_model[1]:.4f})\n")
+        else:
+            f.write("⚠️  No model results found\n")
 
     print(f"Report saved to: {report_path}")
 
@@ -131,7 +149,7 @@ def main():
                         help='Skip ensemble creation')
 
     # Output
-    parser.add_argument('--output_dir', type=str, default='complete_pipeline_results',
+    parser.add_argument('--output_dir', type=str, default='../results/complete_pipeline',
                         help='Output directory for final report')
 
     args = parser.parse_args()
@@ -153,7 +171,7 @@ def main():
     # Step 1: Train BrainGT
     if not args.skip_training:
         cmd = [
-            sys.executable, 'train_advanced_models.py',
+            sys.executable, '../training/advanced/train_advanced_models.py',
             '--model', 'braingt',
             '--epochs', str(epochs),
             '--hidden_dim', '128',
@@ -168,7 +186,7 @@ def main():
 
         # Step 2: Train BrainGNN
         cmd = [
-            sys.executable, 'train_advanced_models.py',
+            sys.executable, '../training/advanced/train_advanced_models.py',
             '--model', 'braingnn',
             '--epochs', str(epochs),
             '--hidden_dim', '128',
@@ -182,7 +200,7 @@ def main():
 
         # Step 3: Train FBNetGen
         cmd = [
-            sys.executable, 'train_advanced_models.py',
+            sys.executable, '../training/advanced/train_advanced_models.py',
             '--model', 'fbnetgen',
             '--epochs', str(epochs),
             '--hidden_dim', '128',
@@ -198,7 +216,7 @@ def main():
     # Step 4: Create Ensemble
     if not args.skip_ensemble:
         cmd = [
-            sys.executable, 'train_ensemble.py',
+            sys.executable, '../training/advanced/train_ensemble.py',
             '--ensemble_type', 'weighted',
             '--optimize_epochs', '100',
             '--device', args.device,
@@ -224,10 +242,10 @@ def main():
     if all_success:
         print(f"\n🎉 All steps completed successfully!")
         print(f"\nResults saved in:")
-        print(f"  - results_braingt_advanced/")
-        print(f"  - results_braingnn_advanced/")
-        print(f"  - results_fbnetgen_advanced/")
-        print(f"  - results_ensemble/")
+        print(f"  - ../results/advanced/braingt/")
+        print(f"  - ../results/advanced/braingnn/")
+        print(f"  - ../results/advanced/fbnetgen/")
+        print(f"  - ../results/ensemble/")
         print(f"  - {args.output_dir}/comparison_report.txt")
     else:
         print(f"\n⚠️  Some steps failed. Check logs above.")
