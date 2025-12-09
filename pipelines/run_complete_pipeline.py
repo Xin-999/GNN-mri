@@ -24,12 +24,14 @@ from pathlib import Path
 import time
 
 
-def run_command(cmd, description):
+def run_command(cmd, description, cwd=None):
     """Run a shell command and handle errors."""
     print(f"\n{'='*70}")
     print(f"STEP: {description}")
     print(f"{'='*70}\n")
     print(f"Command: {' '.join(cmd)}\n")
+    if cwd:
+        print(f"Working directory: {cwd}\n")
 
     start_time = time.time()
 
@@ -39,6 +41,7 @@ def run_command(cmd, description):
             check=True,
             capture_output=False,
             text=True,
+            cwd=cwd,
         )
         elapsed = time.time() - start_time
         print(f"\n✓ {description} completed in {elapsed/60:.1f} minutes")
@@ -50,7 +53,7 @@ def run_command(cmd, description):
         return False
 
 
-def generate_comparison_report(output_dir):
+def generate_comparison_report(output_dir, project_root):
     """Generate a comparison report of all models."""
     print(f"\n{'='*70}")
     print("GENERATING COMPARISON REPORT")
@@ -61,20 +64,20 @@ def generate_comparison_report(output_dir):
 
     for model in models:
         # Check new reorganized path
-        result_file = Path(f"../results/advanced/{model}/{model}_aggregate_summary.json")
+        result_file = project_root / f"results/advanced/{model}/{model}_aggregate_summary.json"
         if not result_file.exists():
             # Fallback to old path
-            result_file = Path(f"results_{model}_advanced/aggregate_results.json")
+            result_file = project_root / f"results_{model}_advanced/aggregate_results.json"
 
         if result_file.exists():
             with open(result_file) as f:
                 results[model] = json.load(f)
 
     # Load ensemble results
-    ensemble_file = Path("../results/ensemble/aggregate_ensemble_results.json")
+    ensemble_file = project_root / "results/ensemble/aggregate_ensemble_results.json"
     if not ensemble_file.exists():
         # Fallback to old path
-        ensemble_file = Path("results_ensemble/aggregate_ensemble_results.json")
+        ensemble_file = project_root / "results_ensemble/aggregate_ensemble_results.json"
 
     if ensemble_file.exists():
         with open(ensemble_file) as f:
@@ -149,29 +152,34 @@ def main():
                         help='Skip ensemble creation')
 
     # Output
-    parser.add_argument('--output_dir', type=str, default='../results/complete_pipeline',
+    parser.add_argument('--output_dir', type=str, default='results/complete_pipeline',
                         help='Output directory for final report')
 
     args = parser.parse_args()
+
+    # Get project root for proper path resolution
+    project_root = Path(__file__).parent.parent
 
     # Configuration
     if args.quick_test:
         print("\n*** QUICK TEST MODE - Using reduced settings ***\n")
         epochs = 10
-        fold_arg = ['--fold_name', 'graphs_outer1_inner1']
+        # Use a valid fold (not the corrupted graphs_outer1_inner1)
+        fold_arg = ['--fold_name', 'graphs_outer1_inner2']
     else:
         epochs = args.epochs
         fold_arg = []
 
-    # Create output directory
-    Path(args.output_dir).mkdir(parents=True, exist_ok=True)
+    # Create output directory (relative to project root)
+    output_path = project_root / args.output_dir
+    output_path.mkdir(parents=True, exist_ok=True)
 
     success_log = []
 
     # Step 1: Train BrainGT
     if not args.skip_training:
         cmd = [
-            sys.executable, '../training/advanced/train_advanced_models.py',
+            sys.executable, 'training/advanced/train_advanced_models.py',
             '--model', 'braingt',
             '--epochs', str(epochs),
             '--hidden_dim', '128',
@@ -181,12 +189,12 @@ def main():
             '--device', args.device,
         ] + fold_arg
 
-        success = run_command(cmd, "Training BrainGT (Graph Transformer)")
+        success = run_command(cmd, "Training BrainGT (Graph Transformer)", cwd=project_root)
         success_log.append(('BrainGT', success))
 
         # Step 2: Train BrainGNN
         cmd = [
-            sys.executable, '../training/advanced/train_advanced_models.py',
+            sys.executable, 'training/advanced/train_advanced_models.py',
             '--model', 'braingnn',
             '--epochs', str(epochs),
             '--hidden_dim', '128',
@@ -195,12 +203,12 @@ def main():
             '--device', args.device,
         ] + fold_arg
 
-        success = run_command(cmd, "Training BrainGNN (ROI-Aware)")
+        success = run_command(cmd, "Training BrainGNN (ROI-Aware)", cwd=project_root)
         success_log.append(('BrainGNN', success))
 
         # Step 3: Train FBNetGen
         cmd = [
-            sys.executable, '../training/advanced/train_advanced_models.py',
+            sys.executable, 'training/advanced/train_advanced_models.py',
             '--model', 'fbnetgen',
             '--epochs', str(epochs),
             '--hidden_dim', '128',
@@ -210,23 +218,23 @@ def main():
             '--device', args.device,
         ] + fold_arg
 
-        success = run_command(cmd, "Training FBNetGen (Task-Aware)")
+        success = run_command(cmd, "Training FBNetGen (Task-Aware)", cwd=project_root)
         success_log.append(('FBNetGen', success))
 
     # Step 4: Create Ensemble
     if not args.skip_ensemble:
         cmd = [
-            sys.executable, '../training/advanced/train_ensemble.py',
+            sys.executable, 'training/advanced/train_ensemble.py',
             '--ensemble_type', 'weighted',
             '--optimize_epochs', '100',
             '--device', args.device,
         ] + fold_arg
 
-        success = run_command(cmd, "Creating Weighted Ensemble")
+        success = run_command(cmd, "Creating Weighted Ensemble", cwd=project_root)
         success_log.append(('Ensemble', success))
 
     # Generate comparison report
-    generate_comparison_report(args.output_dir)
+    generate_comparison_report(output_path, project_root)
 
     # Final summary
     print(f"\n{'='*70}")
@@ -242,10 +250,10 @@ def main():
     if all_success:
         print(f"\n🎉 All steps completed successfully!")
         print(f"\nResults saved in:")
-        print(f"  - ../results/advanced/braingt/")
-        print(f"  - ../results/advanced/braingnn/")
-        print(f"  - ../results/advanced/fbnetgen/")
-        print(f"  - ../results/ensemble/")
+        print(f"  - results/advanced/braingt/")
+        print(f"  - results/advanced/braingnn/")
+        print(f"  - results/advanced/fbnetgen/")
+        print(f"  - results/ensemble/")
         print(f"  - {args.output_dir}/comparison_report.txt")
     else:
         print(f"\n⚠️  Some steps failed. Check logs above.")
