@@ -2,7 +2,7 @@
 """
 train_gatv2_improved.py - Enhanced GATv2 Training with Latest Improvements
 =========================================================================
-
+Claude
 Improvements over train_gatv2_interpretable.py:
 1. ✅ Target Normalization (CRITICAL FIX - prevents training instability)
 2. ✅ DropEdge regularization
@@ -42,8 +42,12 @@ from typing import List, Any, Dict
 # 1. Config
 # ----------------------------
 
-OUTPUT_DIR = "results_gatv2_improved"
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+# Output directory (relative to project root since script moved to training/gatv2/)
+OUTPUT_DIR = Path("../../results/gatv2/improved")
+if not OUTPUT_DIR.exists():
+    # Fallback if running from project root
+    OUTPUT_DIR = Path("results/gatv2/improved")
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 SEED = 42
 BATCH_SIZE = 32
@@ -700,10 +704,19 @@ def main():
         'edge_dropout': args.edge_dropout,
     }
 
-    # Find fold files
-    fold_dir = "data/folds_data"
+    # Find fold files (adjust path since we're in training/gatv2/)
+    fold_dir = Path("../../data/folds_data")
+    if not fold_dir.exists():
+        # Try from project root if running from there
+        fold_dir = Path("data/folds_data")
+
+    if not fold_dir.exists():
+        print(f"Error: Data directory not found at {fold_dir}")
+        print("Make sure you're running from the project root or the data exists.")
+        return
+
     fold_files = sorted(
-        os.path.join(fold_dir, f)
+        str(fold_dir / f)
         for f in os.listdir(fold_dir)
         if f.startswith("graphs_outer") and f.endswith(".pkl")
     )

@@ -328,7 +328,10 @@ def train_fold(model_name, fold_path, config, device):
             patience_counter = 0
 
             # Save best model
-            output_dir = Path(f"results_{model_name}_enhanced") / fold_path.name
+            output_dir = Path(f"../../results/enhanced/{model_name}_enhanced") / fold_path.name
+            if not output_dir.parent.parent.exists():
+                # Fallback: try from project root
+                output_dir = Path(f"results/enhanced/{model_name}_enhanced") / fold_path.name
             output_dir.mkdir(parents=True, exist_ok=True)
 
             torch.save({
@@ -496,7 +499,12 @@ def aggregate_results(model_name, all_results):
     }
 
     # Save aggregate summary
-    output_dir = Path(f"results_{model_name}_enhanced")
+    output_dir = Path(f"../../results/enhanced/{model_name}_enhanced")
+    if not output_dir.parent.exists():
+        # Fallback: try from project root
+        output_dir = Path(f"results/enhanced/{model_name}_enhanced")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
     with open(output_dir / f"{model_name}_aggregate_summary.json", 'w') as f:
         json.dump(aggregate_summary, f, indent=2)
 
@@ -525,7 +533,7 @@ def main():
                         help='Model to train')
 
     # Data
-    parser.add_argument('--data_dir', type=str, default='graphs',
+    parser.add_argument('--data_dir', type=str, default='../../data/folds_data',
                         help='Directory containing graph data')
     parser.add_argument('--fold_name', type=str, default=None,
                         help='Specific fold to train (default: all folds)')
@@ -596,10 +604,19 @@ def main():
 
     # Get fold directories
     data_dir = Path(args.data_dir)
+    if not data_dir.exists():
+        # Fallback: try from project root
+        data_dir = Path("data/folds_data")
+
+    if not data_dir.exists():
+        print(f"Error: Data directory not found at {args.data_dir} or data/folds_data")
+        return
+
+    # Look for .pkl files instead of directories
     if args.fold_name:
-        fold_dirs = [data_dir / args.fold_name]
+        fold_dirs = [data_dir / f"{args.fold_name}.pkl"]
     else:
-        fold_dirs = sorted([d for d in data_dir.iterdir() if d.is_dir()])
+        fold_dirs = sorted(data_dir.glob("graphs_outer*.pkl"))
 
     print(f"\nTraining {args.model.upper()} Enhanced on {len(fold_dirs)} folds")
 

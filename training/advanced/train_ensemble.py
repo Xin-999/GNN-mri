@@ -38,11 +38,11 @@ def main():
     parser = argparse.ArgumentParser(description="Train ensemble of models")
 
     # Model checkpoints
-    parser.add_argument('--braingt_dir', type=str, default='results_braingt_advanced',
+    parser.add_argument('--braingt_dir', type=str, default='../../results/advanced/braingt',
                         help='Directory with BrainGT checkpoints')
-    parser.add_argument('--braingnn_dir', type=str, default='results_braingnn_advanced',
+    parser.add_argument('--braingnn_dir', type=str, default='../../results/advanced/braingnn',
                         help='Directory with BrainGNN checkpoints')
-    parser.add_argument('--fbnetgen_dir', type=str, default='results_fbnetgen_advanced',
+    parser.add_argument('--fbnetgen_dir', type=str, default='../../results/advanced/fbnetgen',
                         help='Directory with FBNetGen checkpoints')
 
     # Ensemble configuration
@@ -53,13 +53,13 @@ def main():
                         help='Epochs to optimize ensemble weights')
 
     # Data
-    parser.add_argument('--fold_dir', type=str, default='data/folds_data',
+    parser.add_argument('--fold_dir', type=str, default='../../data/folds_data',
                         help='Directory with fold data')
     parser.add_argument('--fold_name', type=str, default=None,
                         help='Specific fold (default: all folds)')
 
     # Output
-    parser.add_argument('--output_dir', type=str, default='results_ensemble',
+    parser.add_argument('--output_dir', type=str, default='../../results/ensemble',
                         help='Output directory')
     parser.add_argument('--device', type=str, default='cuda',
                         choices=['cuda', 'cpu'])
@@ -73,6 +73,14 @@ def main():
 
     # Get fold files
     fold_dir = Path(args.fold_dir)
+    if not fold_dir.exists():
+        # Fallback: try from project root
+        fold_dir = Path("data/folds_data")
+
+    if not fold_dir.exists():
+        print(f"Error: Data directory not found at {args.fold_dir} or data/folds_data")
+        return
+
     if args.fold_name:
         fold_files = [fold_dir / f"{args.fold_name}.pkl"]
     else:

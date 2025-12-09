@@ -77,7 +77,15 @@ def load_model_and_data(model_dir, fold_name, device='cpu'):
     scaler = checkpoint.get('scaler', None)
 
     # Load test data
-    fold_data_path = f"data/folds_data/{fold_name}.pkl"
+    fold_data_path = Path(f"../../data/folds_data/{fold_name}.pkl")
+    if not fold_data_path.exists():
+        # Fallback: try from project root
+        fold_data_path = Path(f"data/folds_data/{fold_name}.pkl")
+
+    if not fold_data_path.exists():
+        print(f"Error: Data file not found: {fold_name}.pkl")
+        raise FileNotFoundError(f"Data file not found: {fold_name}.pkl")
+
     print(f"Loading data from {fold_data_path}")
     graphs_dict = torch.load(fold_data_path, map_location='cpu', weights_only=False)
 
@@ -549,7 +557,7 @@ def main():
 
     parser.add_argument('--model_dir', type=str, required=True,
                         help='Directory containing trained models')
-    parser.add_argument('--output_dir', type=str, default='interpretability_analysis',
+    parser.add_argument('--output_dir', type=str, default='../../results/interpretability',
                         help='Output directory for analysis results')
     parser.add_argument('--top_k', type=int, default=20,
                         help='Number of top nodes to report')

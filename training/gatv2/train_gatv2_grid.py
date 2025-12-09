@@ -33,8 +33,13 @@ from typing import List, Any
 # 1. Config & hyperparameter grid
 # ----------------------------
 
-OUTPUT_DIR = "results_gatv2_grid"
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+from pathlib import Path
+
+OUTPUT_DIR = Path("../../results/gatv2/grid")
+if not OUTPUT_DIR.parent.exists():
+    # Fallback: try from project root
+    OUTPUT_DIR = Path("results/gatv2/grid")
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 SEED = 42
 BATCH_SIZE = 32
@@ -288,9 +293,17 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("Using device:", device)
 
-    fold_dir = "data/folds_data"
+    fold_dir = Path("../../data/folds_data")
+    if not fold_dir.exists():
+        # Fallback: try from project root
+        fold_dir = Path("data/folds_data")
+
+    if not fold_dir.exists():
+        print(f"Error: Data directory not found")
+        return
+
     fold_files = sorted(
-        os.path.join(fold_dir, f)
+        str(fold_dir / f)
         for f in os.listdir(fold_dir)
         if f.startswith("graphs_outer") and f.endswith(".pkl")
     )
@@ -384,7 +397,7 @@ def main():
 
             # Save best model for this config+fold
             fold_name = os.path.basename(fold_path).replace(".pkl", "")
-            model_path = os.path.join(OUTPUT_DIR, f"gatv2_cfg{cfg_idx}_best_{fold_name}.pt")
+            model_path = OUTPUT_DIR / f"gatv2_cfg{cfg_idx}_best_{fold_name}.pt"
             if best_state is not None:
                 torch.save(best_state, model_path)
                 print(f"Saved best model for config {cfg_idx}, fold {fold_name} to {model_path}")
@@ -423,7 +436,7 @@ def main():
     print("==============================")
 
     # Save all configs summary to JSON
-    summary_path = os.path.join(OUTPUT_DIR, "gatv2_grid_summary.json")
+    summary_path = OUTPUT_DIR / "gatv2_grid_summary.json"
     with open(summary_path, "w") as f:
         json.dump(all_config_summaries, f, indent=2)
     print(f"\nSaved grid search summary to {summary_path}")

@@ -3,3 +3,5 @@ data/ldw_data
 
 /results_gat_interpretable
 data/folds_data
+
+results_gatv2_interpretable

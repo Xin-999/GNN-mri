@@ -426,7 +426,7 @@ def main():
                         help='Model architecture')
 
     # Data
-    parser.add_argument('--fold_dir', type=str, default='data/folds_data',
+    parser.add_argument('--fold_dir', type=str, default='../../data/folds_data',
                         help='Directory with fold data')
     parser.add_argument('--fold_name', type=str, default=None,
                         help='Specific fold to train (default: all folds)')
@@ -471,7 +471,7 @@ def main():
 
     # Output directory
     if args.output_dir is None:
-        args.output_dir = f"results_{args.model}_advanced"
+        args.output_dir = f"../../results/advanced/{args.model}"
 
     # Configuration
     config = {
@@ -502,6 +502,14 @@ def main():
 
     # Get fold files
     fold_dir = Path(args.fold_dir)
+    if not fold_dir.exists():
+        # Fallback: try from project root
+        fold_dir = Path("data/folds_data")
+
+    if not fold_dir.exists():
+        print(f"Error: Data directory not found at {args.fold_dir} or data/folds_data")
+        return
+
     if args.fold_name:
         fold_files = [fold_dir / f"{args.fold_name}.pkl"]
     else:

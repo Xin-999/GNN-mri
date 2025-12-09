@@ -33,8 +33,19 @@ from torch_geometric.explain.algorithm import GNNExplainer
 # 1. Config
 # ----------------------------
 
-FOLD_DIR = "data/folds_data"
-MODEL_DIR = "results_gatv2_interpretable"
+from pathlib import Path
+
+FOLD_DIR_PATH = Path("../../data/folds_data")
+if not FOLD_DIR_PATH.exists():
+    # Fallback: try from project root
+    FOLD_DIR_PATH = Path("data/folds_data")
+FOLD_DIR = str(FOLD_DIR_PATH)
+
+MODEL_DIR_PATH = Path("../../results/gatv2/basic")
+if not MODEL_DIR_PATH.exists():
+    # Fallback: try from project root
+    MODEL_DIR_PATH = Path("results/gatv2/basic")
+MODEL_DIR = str(MODEL_DIR_PATH)
 
 # choose which fold to explain
 FOLD_BASENAME = "graphs_outer1_inner1.pkl"   # change if you want another fold

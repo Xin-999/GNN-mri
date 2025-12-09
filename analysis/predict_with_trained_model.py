@@ -636,9 +636,9 @@ def main():
 
     parser.add_argument('--model_dir', type=str, required=True,
                         help='Directory containing trained models (e.g., results_gatv2_interpretable)')
-    parser.add_argument('--graphs_dir', type=str, default='graphs',
-                        help='Directory containing graph data')
-    parser.add_argument('--output_dir', type=str, default='predictions_output',
+    parser.add_argument('--graphs_dir', type=str, default='../../data',
+                        help='Directory containing graph data folders')
+    parser.add_argument('--output_dir', type=str, default='../../results/predictions',
                         help='Output directory for Excel files')
     parser.add_argument('--split', type=str, default='test',
                         choices=['train', 'val', 'test', 'all'],
