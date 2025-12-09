@@ -71,7 +71,7 @@ def load_model_and_data(model_dir, fold_name, device='cpu'):
 
     # Load checkpoint
     print(f"Loading model from {model_path}")
-    checkpoint = torch.load(model_path, map_location=device)
+    checkpoint = torch.load(model_path, map_location=device, weights_only=False)
 
     config = checkpoint.get('config', {})
     scaler = checkpoint.get('scaler', None)

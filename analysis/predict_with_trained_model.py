@@ -43,7 +43,7 @@ def load_model_checkpoint(checkpoint_path, device='cpu'):
     Returns:
         checkpoint dict with model_state_dict, config, scaler, etc.
     """
-    checkpoint = torch.load(checkpoint_path, map_location=device)
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     return checkpoint
 
 

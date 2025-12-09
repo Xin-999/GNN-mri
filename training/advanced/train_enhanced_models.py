@@ -352,7 +352,7 @@ def train_fold(model_name, fold_path, config, device):
     print(f"\nBest epoch: {best_epoch}")
 
     # Load best model for testing
-    checkpoint = torch.load(output_dir / f"{model_name}_best.pt")
+    checkpoint = torch.load(output_dir / f"{model_name}_best.pt", weights_only=False)
     model.load_state_dict(checkpoint['model_state_dict'])
 
     # Test evaluation

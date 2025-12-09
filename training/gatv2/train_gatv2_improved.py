@@ -597,11 +597,9 @@ def train_fold(fold_path, config, device):
         # Print progress
         print(
             f"Epoch {epoch:03d}/{config['epochs']:03d} | "
-            f"Train Loss: {train_loss:.4f} | "
-            f"Val Loss: {val_results['loss']:.4f} | "
+            f"Train MSE: {train_loss:.4f} | Val MSE: {val_results['loss']:.4f} | "
             f"Win r: {val_results['win_metrics_orig']['r']:.4f} | "
             f"Subj r: {val_results['subj_metrics_orig']['r']:.4f} | "
-            f"LR: {optimizer.param_groups[0]['lr']:.2e} | "
             f"Time: {history[-1]['time']:.1f}s"
         )
 
@@ -635,7 +633,7 @@ def train_fold(fold_path, config, device):
     print(f"\nBest epoch: {best_epoch}")
 
     # Load best model
-    checkpoint = torch.load(fold_output_dir / "gatv2_best.pt")
+    checkpoint = torch.load(fold_output_dir / "gatv2_best.pt", weights_only=False)
     model.load_state_dict(checkpoint['model_state_dict'])
 
     # Test evaluation

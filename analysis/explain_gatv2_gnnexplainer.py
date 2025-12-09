@@ -198,7 +198,7 @@ def main():
         use_global_attention_pool=True,
     ).to(device)
 
-    state_dict = torch.load(ckpt_path, map_location=device)
+    state_dict = torch.load(ckpt_path, map_location=device, weights_only=False)
     base_model.load_state_dict(state_dict)
     base_model.eval()
 
