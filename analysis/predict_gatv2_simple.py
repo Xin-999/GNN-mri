@@ -309,9 +309,46 @@ def predict_fold(model_dir, fold_name, device, split='all'):
     return results
 
 
-def save_to_excel(all_results, output_dir, model_dir_name):
+def save_fold_to_excel(fold_name, fold_results, output_dir):
     """
-    Save prediction results to Excel files.
+    Save a single fold's prediction results to Excel file.
+
+    Args:
+        fold_name: Name of the fold
+        fold_results: Results dictionary for this fold
+        output_dir: Output directory
+    """
+    if fold_results is None:
+        return
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    excel_path = output_dir / f"{fold_name}_predictions.xlsx"
+
+    with pd.ExcelWriter(excel_path, engine='openpyxl') as writer:
+        # Write each split to a separate sheet
+        for split_name, split_data in fold_results.items():
+            df = pd.DataFrame({
+                'Subject_ID': split_data['subject_ids'],
+                'True_Score': split_data['targets'],
+                'Predicted_Score': split_data['predictions'],
+                'Error': split_data['errors'],
+                'Absolute_Error': split_data['absolute_errors'],
+            })
+
+            df.to_excel(writer, sheet_name=split_name.capitalize(), index=False)
+
+            # Add metrics summary
+            metrics_df = pd.DataFrame([split_data['metrics']])
+            metrics_df.to_excel(writer, sheet_name=f"{split_name.capitalize()}_Metrics", index=False)
+
+    print(f"Saved: {excel_path}\n")
+
+
+def save_aggregate_summary(all_results, output_dir, model_dir_name):
+    """
+    Save aggregate summary across all folds.
 
     Args:
         all_results: Dictionary of results by fold
@@ -320,32 +357,6 @@ def save_to_excel(all_results, output_dir, model_dir_name):
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-
-    # Save per-fold results
-    for fold_name, fold_results in all_results.items():
-        if fold_results is None:
-            continue
-
-        excel_path = output_dir / f"{fold_name}_predictions.xlsx"
-
-        with pd.ExcelWriter(excel_path, engine='openpyxl') as writer:
-            # Write each split to a separate sheet
-            for split_name, split_data in fold_results.items():
-                df = pd.DataFrame({
-                    'Subject_ID': split_data['subject_ids'],
-                    'True_Score': split_data['targets'],
-                    'Predicted_Score': split_data['predictions'],
-                    'Error': split_data['errors'],
-                    'Absolute_Error': split_data['absolute_errors'],
-                })
-
-                df.to_excel(writer, sheet_name=split_name.capitalize(), index=False)
-
-                # Add metrics summary
-                metrics_df = pd.DataFrame([split_data['metrics']])
-                metrics_df.to_excel(writer, sheet_name=f"{split_name.capitalize()}_Metrics", index=False)
-
-        print(f"Saved: {excel_path}")
 
     # Create aggregate summary
     summary_rows = []
@@ -428,6 +439,10 @@ def main():
         try:
             results = predict_fold(args.model_dir, fold_name, device, split=args.split)
             all_results[fold_name] = results
+
+            # Save this fold's results immediately
+            save_fold_to_excel(fold_name, results, args.output_dir)
+
         except Exception as e:
             print(f"\nError predicting fold {fold_name}: {e}")
             import traceback
@@ -435,10 +450,10 @@ def main():
             all_results[fold_name] = None
             continue
 
-    # Save results to Excel
+    # Save aggregate summary
     if all_results:
         model_dir_name = Path(args.model_dir).name
-        save_to_excel(all_results, args.output_dir, model_dir_name)
+        save_aggregate_summary(all_results, args.output_dir, model_dir_name)
 
         print(f"\n{'='*70}")
         print(f"Predictions complete!")

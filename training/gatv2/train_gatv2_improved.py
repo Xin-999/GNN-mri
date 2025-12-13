@@ -38,6 +38,21 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from scipy.stats import pearsonr
 from typing import List, Any, Dict
 
+
+# ----------------------------
+# Custom JSON Encoder for Numpy Types
+# ----------------------------
+
+class NumpyEncoder(json.JSONEncoder):
+    """Custom encoder for numpy data types."""
+    def default(self, obj):
+        if isinstance(obj, (np.integer, np.floating, np.bool_)):
+            return obj.item()
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return super(NumpyEncoder, self).default(obj)
+
+
 # ----------------------------
 # 1. Config
 # ----------------------------
@@ -665,7 +680,7 @@ def train_fold(fold_path, config, device):
     }
 
     with open(fold_output_dir / "gatv2_summary.json", 'w') as f:
-        json.dump(summary, f, indent=2)
+        json.dump(summary, f, indent=2, cls=NumpyEncoder)
 
     return summary
 
@@ -754,7 +769,7 @@ def main():
     }
 
     with open(Path(OUTPUT_DIR) / "gatv2_aggregate_summary.json", 'w') as f:
-        json.dump(aggregate, f, indent=2)
+        json.dump(aggregate, f, indent=2, cls=NumpyEncoder)
 
     print(f"\nResults saved to: {OUTPUT_DIR}/")
 
