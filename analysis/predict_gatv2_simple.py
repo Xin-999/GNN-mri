@@ -87,7 +87,9 @@ def load_model_and_data(model_dir, fold_name, device='cpu'):
 
     # Get input dimension from first non-padded graph
     sample_graph = None
-    for row in train_2d + val_2d + test_2d:
+    # Convert numpy arrays to lists for iteration
+    all_graphs = list(train_2d) + list(val_2d) + list(test_2d)
+    for row in all_graphs:
         for g in row:
             if not (hasattr(g, "pad") and bool(g.pad)):
                 sample_graph = g
@@ -267,7 +269,7 @@ def predict_fold(model_dir, fold_name, device, split='all'):
 
     # Process each split
     for split_name, graphs_2d in splits_to_process:
-        if not graphs_2d:
+        if len(graphs_2d) == 0:
             print(f"No {split_name} data available")
             continue
 
