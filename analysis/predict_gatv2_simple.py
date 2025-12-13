@@ -120,7 +120,9 @@ def load_model_and_data(model_dir, fold_name, device='cpu'):
             model = temp_model
             print(f"Loaded model: ImprovedGATv2Regressor")
         except Exception as e:
-            print(f"Could not load ImprovedGATv2Regressor: {type(e).__name__}")
+            print(f"Could not load ImprovedGATv2Regressor: {type(e).__name__}: {str(e)[:200]}")
+    else:
+        print("ImprovedGATv2Regressor class is None (import failed)")
 
     # Try GATv2Regressor (basic) if improved didn't work
     if model is None and GATv2Regressor is not None:
@@ -133,7 +135,9 @@ def load_model_and_data(model_dir, fold_name, device='cpu'):
             model = temp_model
             print(f"Loaded model: GATv2Regressor")
         except Exception as e:
-            print(f"Could not load GATv2Regressor: {type(e).__name__}")
+            print(f"Could not load GATv2Regressor: {type(e).__name__}: {str(e)[:200]}")
+    elif model is None:
+        print("GATv2Regressor class is None (import failed)")
 
     if model is None:
         raise RuntimeError("Could not load model - no compatible architecture found")
