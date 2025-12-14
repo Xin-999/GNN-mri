@@ -31,7 +31,8 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from pathlib import Path
 
 from torch_geometric.loader import DataLoader
-from torch_geometric.nn import GATv2Conv, GlobalAttention, global_mean_pool
+from torch_geometric.nn import GATv2Conv, global_mean_pool
+from torch_geometric.nn.aggr import AttentionalAggregation
 from torch_geometric.utils import dropout_edge
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
@@ -249,7 +250,7 @@ class ImprovedGATv2Regressor(nn.Module):
                 nn.Dropout(dropout),
                 nn.Linear(hidden_dim, 1)
             )
-            self.pool = GlobalAttention(gate_nn=self.gate_nn)
+            self.pool = AttentionalAggregation(gate_nn=self.gate_nn)
         else:
             self.pool = global_mean_pool
 
