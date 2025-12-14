@@ -68,7 +68,7 @@ SEED = 42
 BATCH_SIZE = 32
 LR = 1e-3
 WEIGHT_DECAY = 1e-4
-EPOCHS = 100
+EPOCHS = 50
 PATIENCE = 15
 USE_GLOBAL_ATTENTION_POOL = True
 
@@ -684,9 +684,197 @@ def train_fold(fold_path, config, device):
     return summary
 
 
+def generate_hyperparameter_grid():
+    """
+    Define hyperparameter grid for grid search.
+
+    Returns:
+        List of config dictionaries to try
+    """
+    from itertools import product
+
+    # Define ranges for each hyperparameter
+    grid = {
+        'hidden_dim': [64, 128, 256],
+        'n_layers': [2, 3, 4],
+        'n_heads': [4, 8],
+        'dropout': [0.1, 0.2, 0.3],
+        'edge_dropout': [0.0, 0.1, 0.2],
+        'lr': [1e-3, 5e-4, 1e-4],
+    }
+
+    # Fixed parameters
+    fixed = {
+        'epochs': EPOCHS,
+        'patience': PATIENCE,
+        'batch_size': BATCH_SIZE,
+        'weight_decay': WEIGHT_DECAY,
+    }
+
+    # Generate all combinations
+    keys = grid.keys()
+    values = grid.values()
+    configs = []
+
+    for combination in product(*values):
+        config = fixed.copy()
+        config.update(dict(zip(keys, combination)))
+        configs.append(config)
+
+    return configs
+
+
+def run_grid_search(device):
+    """
+    Run grid search over hyperparameter configurations.
+
+    Args:
+        device: Device to run on
+    """
+    print("="*80)
+    print("GRID SEARCH MODE")
+    print("="*80)
+
+    # Generate configs
+    configs = generate_hyperparameter_grid()
+    print(f"\nTotal configurations to try: {len(configs)}")
+
+    # Find fold files
+    fold_dir = Path("../../data/folds_data")
+    if not fold_dir.exists():
+        fold_dir = Path("data/folds_data")
+
+    if not fold_dir.exists():
+        print(f"Error: Data directory not found")
+        return
+
+    fold_files = sorted(
+        str(fold_dir / f)
+        for f in os.listdir(fold_dir)
+        if f.startswith("graphs_outer") and f.endswith(".pkl")
+    )
+
+    print(f"Number of folds: {len(fold_files)}")
+    print(f"\nEstimated time: {len(configs)} configs × {len(fold_files)} folds")
+    input("\nPress Enter to start grid search...")
+
+    # Store results for all configs
+    all_config_results = []
+
+    # Train each configuration
+    for config_idx, config in enumerate(configs, 1):
+        print(f"\n{'='*80}")
+        print(f"CONFIG {config_idx}/{len(configs)}")
+        print(f"{'='*80}")
+        print(f"Hidden dim: {config['hidden_dim']}, Layers: {config['n_layers']}, "
+              f"Heads: {config['n_heads']}")
+        print(f"Dropout: {config['dropout']}, Edge dropout: {config['edge_dropout']}, "
+              f"LR: {config['lr']}")
+
+        # Create unique output directory for this config
+        config_name = (f"h{config['hidden_dim']}_l{config['n_layers']}_"
+                      f"head{config['n_heads']}_d{config['dropout']}_"
+                      f"ed{config['edge_dropout']}_lr{config['lr']}")
+
+        # Set output directory for this config
+        global OUTPUT_DIR
+        OUTPUT_DIR = Path(f"../../results/gatv2/grid/{config_name}")
+        if not OUTPUT_DIR.exists():
+            OUTPUT_DIR = Path(f"results/gatv2/grid/{config_name}")
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+        # Train all folds with this config
+        fold_results = []
+        for fold_path in fold_files:
+            try:
+                result = train_fold(fold_path, config, device)
+                fold_results.append(result)
+            except Exception as e:
+                print(f"\nError training {fold_path}: {e}")
+                import traceback
+                traceback.print_exc()
+                continue
+
+        if not fold_results:
+            print(f"⚠️  Config {config_idx} failed - skipping")
+            continue
+
+        # Aggregate results for this config
+        subj_rs = [r['test_metrics']['subject_level']['r'] for r in fold_results]
+        subj_mses = [r['test_metrics']['subject_level']['mse'] for r in fold_results]
+
+        config_summary = {
+            'config_index': config_idx,
+            'config_name': config_name,
+            'config': config,
+            'n_folds': len(fold_results),
+            'subject_level_r': {
+                'mean': float(np.mean(subj_rs)),
+                'std': float(np.std(subj_rs)),
+                'min': float(np.min(subj_rs)),
+                'max': float(np.max(subj_rs)),
+            },
+            'subject_level_mse': {
+                'mean': float(np.mean(subj_mses)),
+                'std': float(np.std(subj_mses)),
+            },
+            'per_fold': fold_results,
+        }
+
+        # Save aggregate for this config
+        with open(OUTPUT_DIR / "gatv2_aggregate_summary.json", 'w') as f:
+            json.dump(config_summary, f, indent=2, cls=NumpyEncoder)
+
+        all_config_results.append(config_summary)
+
+        print(f"\n✓ Config {config_idx} complete:")
+        print(f"  Subject R: {config_summary['subject_level_r']['mean']:.4f} ± "
+              f"{config_summary['subject_level_r']['std']:.4f}")
+        print(f"  Subject MSE: {config_summary['subject_level_mse']['mean']:.2f} ± "
+              f"{config_summary['subject_level_mse']['std']:.2f}")
+
+    # Save grid search summary
+    print(f"\n{'='*80}")
+    print("GRID SEARCH COMPLETE")
+    print(f"{'='*80}")
+
+    # Sort by mean subject R (descending)
+    all_config_results.sort(key=lambda x: x['subject_level_r']['mean'], reverse=True)
+
+    # Save grid search results
+    grid_summary = {
+        'total_configs': len(configs),
+        'successful_configs': len(all_config_results),
+        'best_config': all_config_results[0] if all_config_results else None,
+        'all_results': all_config_results,
+    }
+
+    grid_summary_path = Path("results/gatv2/grid_search_summary.json")
+    grid_summary_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(grid_summary_path, 'w') as f:
+        json.dump(grid_summary, f, indent=2, cls=NumpyEncoder)
+
+    print(f"\n✓ Grid search summary saved to: {grid_summary_path}")
+
+    # Print top 5 configs
+    print(f"\nTop 5 Configurations:")
+    print("-" * 80)
+    for i, result in enumerate(all_config_results[:5], 1):
+        print(f"\n{i}. {result['config_name']}")
+        print(f"   Subject R: {result['subject_level_r']['mean']:.4f} ± "
+              f"{result['subject_level_r']['std']:.4f}")
+        print(f"   Config: hidden_dim={result['config']['hidden_dim']}, "
+              f"n_layers={result['config']['n_layers']}, "
+              f"dropout={result['config']['dropout']}, lr={result['config']['lr']}")
+
+    return grid_summary
+
+
 def main():
     parser = argparse.ArgumentParser(description="Train improved GATv2 regressor")
     parser.add_argument("--device", choices=["auto", "cuda", "cpu"], default="auto")
+    parser.add_argument("--grid_search", action="store_true",
+                       help="Run grid search over hyperparameters")
     parser.add_argument("--epochs", type=int, default=EPOCHS)
     parser.add_argument("--patience", type=int, default=PATIENCE)
     parser.add_argument("--hidden_dim", type=int, default=64)
@@ -702,6 +890,11 @@ def main():
     set_seed(SEED)
     device = select_device(args.device)
     print(f"Using device: {device}")
+
+    # Grid search mode
+    if args.grid_search:
+        run_grid_search(device)
+        return
 
     config = {
         'epochs': args.epochs,
