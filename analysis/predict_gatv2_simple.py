@@ -38,6 +38,29 @@ except Exception as e:
     GATv2Regressor = None
 
 
+def load_subject_ids_and_scores(csv_path='data/ListSort_AgeAdj.csv'):
+    """
+    Load real subject IDs and cognitive scores from CSV.
+
+    Returns:
+        subject_ids: List of subject IDs in order
+        scores: List of cognitive scores in order
+    """
+    csv_file = Path(csv_path)
+    if not csv_file.exists():
+        print(f"Warning: {csv_path} not found. Using array indices as subject IDs.")
+        return None, None
+
+    df = pd.read_csv(csv_file)
+    subject_ids = df['Subject'].tolist()
+    scores = df['ListSort_AgeAdj'].tolist()
+
+    print(f"\nLoaded {len(subject_ids)} subjects from {csv_path}")
+    print(f"Original score range: [{min(scores):.2f}, {max(scores):.2f}]")
+
+    return subject_ids, scores
+
+
 def load_model_and_data(model_dir, fold_name, device='cpu'):
     """
     Load trained model and data for a specific fold.
@@ -168,13 +191,14 @@ def load_model_and_data(model_dir, fold_name, device='cpu'):
     }, scaler, config
 
 
-def flatten_graphs(graphs_2d, real_subject_indices=None, split_name='split'):
+def flatten_graphs(graphs_2d, fold_subject_indices=None, all_subject_ids=None, split_name='split'):
     """
     Flatten 2D graph list and extract subject IDs and targets.
 
     Args:
         graphs_2d: 2D list of graphs [subject][window]
-        real_subject_indices: Array of real subject IDs (optional)
+        fold_subject_indices: Array indices for this split (e.g., [0, 1, 5, 7...])
+        all_subject_ids: Full list of real subject IDs to lookup from
         split_name: Name of this split
 
     Returns:
@@ -185,11 +209,18 @@ def flatten_graphs(graphs_2d, real_subject_indices=None, split_name='split'):
     targets = []
 
     for subj_idx, row in enumerate(graphs_2d):
-        # Get the real subject ID
-        if real_subject_indices is not None and subj_idx < len(real_subject_indices):
-            real_subject_id = int(real_subject_indices[subj_idx])
+        # Get the real subject ID by looking up the fold index
+        if fold_subject_indices is not None and all_subject_ids is not None:
+            if subj_idx < len(fold_subject_indices):
+                array_index = int(fold_subject_indices[subj_idx])
+                if array_index < len(all_subject_ids):
+                    real_subject_id = all_subject_ids[array_index]
+                else:
+                    real_subject_id = array_index
+            else:
+                real_subject_id = subj_idx
         else:
-            real_subject_id = subj_idx  # Fallback to index if no real IDs available
+            real_subject_id = subj_idx  # Fallback to index if no mapping available
 
         for window_idx, g in enumerate(row):
             # Skip padded graphs
@@ -272,6 +303,9 @@ def predict_fold(model_dir, fold_name, device, split='all'):
     print(f"Processing fold: {fold_name}")
     print(f"{'='*70}")
 
+    # Load real subject IDs and scores from CSV
+    all_subject_ids, all_scores = load_subject_ids_and_scores()
+
     # Load model and data
     model, data_dict, scaler, config = load_model_and_data(model_dir, fold_name, device)
 
@@ -299,8 +333,13 @@ def predict_fold(model_dir, fold_name, device, split='all'):
 
         print(f"\nPredicting {split_name} split...")
 
-        # Flatten graphs (with real subject IDs)
-        graphs, subject_ids, targets_normalized = flatten_graphs(graphs_2d, real_indices, split_name)
+        # Flatten graphs (with real subject IDs from CSV)
+        graphs, subject_ids, targets_normalized = flatten_graphs(
+            graphs_2d,
+            fold_subject_indices=real_indices,
+            all_subject_ids=all_subject_ids,
+            split_name=split_name
+        )
 
         if not graphs:
             print(f"No valid graphs in {split_name} split")
@@ -308,19 +347,26 @@ def predict_fold(model_dir, fold_name, device, split='all'):
 
         # Debug: Check subject_ids
         print(f"  Subject IDs: {subject_ids[:5]}... (first 5)")
-        print(f"  Unique subjects: {sorted(set(subject_ids))}")
+        print(f"  Unique subjects: {sorted(set(subject_ids))[:10]}...")
 
-        # Denormalize targets to original scale
-        targets_array = np.array(targets_normalized)
-        if scaler is not None:
-            targets = scaler.inverse_transform(targets_array.reshape(-1, 1)).flatten()
+        # Get true scores from CSV for each window's subject
+        if all_subject_ids is not None and all_scores is not None:
+            # Map subject ID to score
+            score_map = {sid: score for sid, score in zip(all_subject_ids, all_scores)}
+            # Get score for each window based on its subject ID
+            targets = np.array([score_map.get(sid, np.nan) for sid in subject_ids])
             print(f"  {len(graphs)} windows from {len(set(subject_ids))} subjects")
-            print(f"  Target range (normalized): [{np.min(targets_normalized):.2f}, {np.max(targets_normalized):.2f}]")
-            print(f"  Target range (original): [{np.min(targets):.2f}, {np.max(targets):.2f}]")
+            print(f"  Target range (from CSV): [{np.nanmin(targets):.2f}, {np.nanmax(targets):.2f}]")
         else:
-            targets = targets_array
-            print(f"  {len(graphs)} windows from {len(set(subject_ids))} subjects")
-            print(f"  WARNING: No scaler - targets remain normalized!")
+            # Fallback: Use scaler to denormalize
+            targets_array = np.array(targets_normalized)
+            if scaler is not None:
+                targets = scaler.inverse_transform(targets_array.reshape(-1, 1)).flatten()
+                print(f"  {len(graphs)} windows from {len(set(subject_ids))} subjects")
+                print(f"  Target range (from scaler): [{np.min(targets):.2f}, {np.max(targets):.2f}]")
+            else:
+                targets = targets_array
+                print(f"  WARNING: No scaler or CSV - targets remain normalized!")
 
         # Make predictions (predictions are denormalized in predict_split if scaler exists)
         predictions = predict_split(model, graphs, scaler, device)
