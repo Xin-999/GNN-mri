@@ -40,16 +40,19 @@ except Exception as e:
 
 def load_subject_ids_and_scores(csv_path='data/ListSort_AgeAdj.csv'):
     """
-    Load real subject IDs and cognitive scores from CSV.
+    Load real subject IDs and cognitive scores from CSV and create scaler.
 
     Returns:
         subject_ids: List of subject IDs in order
         scores: List of cognitive scores in order
+        scaler: StandardScaler fit on the original scores
     """
+    from sklearn.preprocessing import StandardScaler
+
     csv_file = Path(csv_path)
     if not csv_file.exists():
         print(f"Warning: {csv_path} not found. Using array indices as subject IDs.")
-        return None, None
+        return None, None, None
 
     df = pd.read_csv(csv_file)
     subject_ids = df['Subject'].tolist()
@@ -58,7 +61,12 @@ def load_subject_ids_and_scores(csv_path='data/ListSort_AgeAdj.csv'):
     print(f"\nLoaded {len(subject_ids)} subjects from {csv_path}")
     print(f"Original score range: [{min(scores):.2f}, {max(scores):.2f}]")
 
-    return subject_ids, scores
+    # Fit scaler on original scores
+    scaler = StandardScaler()
+    scaler.fit(np.array(scores).reshape(-1, 1))
+    print(f"Fitted new scaler - Mean: {scaler.mean_[0]:.2f}, Std: {scaler.scale_[0]:.2f}")
+
+    return subject_ids, scores, scaler
 
 
 def load_model_and_data(model_dir, fold_name, device='cpu'):
@@ -303,11 +311,11 @@ def predict_fold(model_dir, fold_name, device, split='all'):
     print(f"Processing fold: {fold_name}")
     print(f"{'='*70}")
 
-    # Load real subject IDs and scores from CSV
-    all_subject_ids, all_scores = load_subject_ids_and_scores()
+    # Load real subject IDs and scores from CSV (with correct scaler)
+    all_subject_ids, all_scores, csv_scaler = load_subject_ids_and_scores()
 
-    # Load model and data
-    model, data_dict, scaler, config = load_model_and_data(model_dir, fold_name, device)
+    # Load model and data (ignore the checkpoint scaler, use CSV scaler instead)
+    model, data_dict, _, config = load_model_and_data(model_dir, fold_name, device)
 
     results = {}
 
@@ -350,40 +358,58 @@ def predict_fold(model_dir, fold_name, device, split='all'):
         print(f"  Unique subjects: {sorted(set(subject_ids))[:10]}...")
 
         # Get true scores from CSV for each window's subject
-        if all_subject_ids is not None and all_scores is not None:
-            # Map subject ID to score
+        if all_subject_ids is not None and all_scores is not None and csv_scaler is not None:
+            # Map subject ID to score (original values)
             score_map = {sid: score for sid, score in zip(all_subject_ids, all_scores)}
-            # Get score for each window based on its subject ID
-            targets = np.array([score_map.get(sid, np.nan) for sid in subject_ids])
+            targets_original = np.array([score_map.get(sid, np.nan) for sid in subject_ids])
+
+            # Normalize targets using CSV scaler
+            targets_normalized_csv = csv_scaler.transform(targets_original.reshape(-1, 1)).flatten()
+
             print(f"  {len(graphs)} windows from {len(set(subject_ids))} subjects")
-            print(f"  Target range (from CSV): [{np.nanmin(targets):.2f}, {np.nanmax(targets):.2f}]")
+            print(f"  Target range (original): [{np.nanmin(targets_original):.2f}, {np.nanmax(targets_original):.2f}]")
+            print(f"  Target range (normalized): [{np.nanmin(targets_normalized_csv):.2f}, {np.nanmax(targets_normalized_csv):.2f}]")
         else:
-            # Fallback: Use scaler to denormalize
-            targets_array = np.array(targets_normalized)
-            if scaler is not None:
-                targets = scaler.inverse_transform(targets_array.reshape(-1, 1)).flatten()
-                print(f"  {len(graphs)} windows from {len(set(subject_ids))} subjects")
-                print(f"  Target range (from scaler): [{np.min(targets):.2f}, {np.max(targets):.2f}]")
-            else:
-                targets = targets_array
-                print(f"  WARNING: No scaler or CSV - targets remain normalized!")
+            targets_original = np.array(targets_normalized)
+            targets_normalized_csv = targets_original
+            print(f"  WARNING: No CSV/scaler - using graph targets as-is!")
 
-        # Make predictions (predictions are denormalized in predict_split if scaler exists)
-        predictions = predict_split(model, graphs, scaler, device)
-        print(f"  Prediction range: [{np.min(predictions):.2f}, {np.max(predictions):.2f}]")
+        # Make predictions (model outputs normalized predictions)
+        predictions_normalized = predict_split(model, graphs, scaler=None, device=device)  # Don't denormalize yet
 
-        # Calculate metrics (both targets and predictions are in original scale)
-        metrics = calculate_metrics(targets, predictions)
+        # Denormalize predictions using CSV scaler
+        if csv_scaler is not None:
+            predictions_original = csv_scaler.inverse_transform(predictions_normalized.reshape(-1, 1)).flatten()
+            print(f"  Prediction range (original): [{np.min(predictions_original):.2f}, {np.max(predictions_original):.2f}]")
+        else:
+            predictions_original = predictions_normalized
+            print(f"  WARNING: No CSV scaler - predictions remain normalized!")
+
+        # Calculate metrics on original scale
+        metrics = calculate_metrics(targets_original, predictions_original)
 
         print(f"  Metrics: r={metrics['r']:.4f}, MSE={metrics['mse']:.4f}, MAE={metrics['mae']:.4f}")
 
+        # Calculate errors on original scale
+        errors_original = predictions_original - targets_original
+        absolute_errors_original = np.abs(errors_original)
+
+        # Calculate errors on normalized scale
+        errors_normalized = predictions_normalized - targets_normalized_csv
+        absolute_errors_normalized = np.abs(errors_normalized)
+
         # Store results (convert to lists for Excel compatibility)
         results[split_name] = {
-            'subject_ids': [int(sid) for sid in subject_ids],  # Ensure integers
-            'targets': targets.tolist() if isinstance(targets, np.ndarray) else list(targets),
-            'predictions': predictions.tolist() if isinstance(predictions, np.ndarray) else list(predictions),
-            'errors': (np.array(predictions) - np.array(targets)).tolist(),
-            'absolute_errors': np.abs(np.array(predictions) - np.array(targets)).tolist(),
+            'split': [split_name] * len(subject_ids),  # Split indicator
+            'subject_ids': [int(sid) for sid in subject_ids],  # Real subject IDs
+            'targets_original': targets_original.tolist(),
+            'predictions_original': predictions_original.tolist(),
+            'targets_normalized': targets_normalized_csv.tolist(),
+            'predictions_normalized': predictions_normalized.tolist(),
+            'error_original': errors_original.tolist(),
+            'error_normalized': errors_normalized.tolist(),
+            'absolute_error_original': absolute_errors_original.tolist(),
+            'absolute_error_normalized': absolute_errors_normalized.tolist(),
             'metrics': metrics,
         }
 
@@ -411,16 +437,21 @@ def save_fold_to_excel(fold_name, fold_results, output_dir):
         # Write each split to a separate sheet
         for split_name, split_data in fold_results.items():
             df = pd.DataFrame({
+                'Split': split_data['split'],
                 'Subject_ID': split_data['subject_ids'],
-                'True_Score': split_data['targets'],
-                'Predicted_Score': split_data['predictions'],
-                'Error': split_data['errors'],
-                'Absolute_Error': split_data['absolute_errors'],
+                'True_Score_Original': split_data['targets_original'],
+                'Predicted_Score_Original': split_data['predictions_original'],
+                'True_Score_Normalized': split_data['targets_normalized'],
+                'Predicted_Score_Normalized': split_data['predictions_normalized'],
+                'Error_Original': split_data['error_original'],
+                'Error_Normalized': split_data['error_normalized'],
+                'Absolute_Error_Original': split_data['absolute_error_original'],
+                'Absolute_Error_Normalized': split_data['absolute_error_normalized'],
             })
 
             df.to_excel(writer, sheet_name=split_name.capitalize(), index=False)
 
-            # Add metrics summary
+            # Add metrics summary (calculated on original scale)
             metrics_df = pd.DataFrame([split_data['metrics']])
             metrics_df.to_excel(writer, sheet_name=f"{split_name.capitalize()}_Metrics", index=False)
 
