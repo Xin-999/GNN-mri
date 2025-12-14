@@ -69,6 +69,12 @@ def load_model_and_data(model_dir, fold_name, device='cpu'):
         state_dict = checkpoint
         print("Warning: Old checkpoint format detected")
 
+    # Verify scaler is loaded
+    if scaler is not None:
+        print(f"Scaler loaded - Mean: {scaler.mean_[0]:.2f}, Std: {scaler.scale_[0]:.2f}")
+    else:
+        print("WARNING: No scaler found in checkpoint! Predictions will be in normalized scale.")
+
     # Load fold data
     fold_data_path = Path(f"../../data/folds_data/{fold_name}.pkl")
     if not fold_data_path.exists():
@@ -209,7 +215,7 @@ def predict_split(model, graphs, scaler, device, batch_size=32):
         batch_size: Batch size for prediction
 
     Returns:
-        numpy array of predictions
+        numpy array of predictions (denormalized if scaler exists)
     """
     loader = DataLoader(graphs, batch_size=batch_size, shuffle=False)
     predictions = []
@@ -222,10 +228,14 @@ def predict_split(model, graphs, scaler, device, batch_size=32):
             predictions.append(pred.cpu().numpy())
 
     predictions = np.concatenate(predictions)
+    predictions_normalized = predictions.copy()
 
     # Inverse transform if scaler available
     if scaler is not None:
         predictions = scaler.inverse_transform(predictions.reshape(-1, 1)).flatten()
+        print(f"    Denormalized predictions: {predictions_normalized[:3]} -> {predictions[:3]}")
+    else:
+        print(f"    WARNING: No scaler - predictions remain normalized!")
 
     return predictions
 
@@ -290,24 +300,21 @@ def predict_fold(model_dir, fold_name, device, split='all'):
         print(f"\nPredicting {split_name} split...")
 
         # Flatten graphs (with real subject IDs)
-        graphs, subject_ids, targets_normalized = flatten_graphs(graphs_2d, real_indices, split_name)
+        # Note: targets from fold files are already in ORIGINAL scale (not normalized)
+        graphs, subject_ids, targets = flatten_graphs(graphs_2d, real_indices, split_name)
 
         if not graphs:
             print(f"No valid graphs in {split_name} split")
             continue
 
         print(f"  {len(graphs)} windows from {len(set(subject_ids))} subjects")
+        print(f"  Target range: [{np.min(targets):.2f}, {np.max(targets):.2f}]")
 
-        # Make predictions (predictions are denormalized in predict_split)
+        # Make predictions (predictions are denormalized in predict_split if scaler exists)
         predictions = predict_split(model, graphs, scaler, device)
+        print(f"  Prediction range: [{np.min(predictions):.2f}, {np.max(predictions):.2f}]")
 
-        # Denormalize targets to match predictions
-        if scaler is not None:
-            targets = scaler.inverse_transform(np.array(targets_normalized).reshape(-1, 1)).flatten()
-        else:
-            targets = targets_normalized
-
-        # Calculate metrics (using denormalized values)
+        # Calculate metrics (both targets and predictions are in original scale)
         metrics = calculate_metrics(targets, predictions)
 
         print(f"  Metrics: r={metrics['r']:.4f}, MSE={metrics['mse']:.4f}, MAE={metrics['mae']:.4f}")
