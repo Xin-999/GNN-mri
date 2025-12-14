@@ -300,15 +300,27 @@ def predict_fold(model_dir, fold_name, device, split='all'):
         print(f"\nPredicting {split_name} split...")
 
         # Flatten graphs (with real subject IDs)
-        # Note: targets from fold files are already in ORIGINAL scale (not normalized)
-        graphs, subject_ids, targets = flatten_graphs(graphs_2d, real_indices, split_name)
+        graphs, subject_ids, targets_normalized = flatten_graphs(graphs_2d, real_indices, split_name)
 
         if not graphs:
             print(f"No valid graphs in {split_name} split")
             continue
 
-        print(f"  {len(graphs)} windows from {len(set(subject_ids))} subjects")
-        print(f"  Target range: [{np.min(targets):.2f}, {np.max(targets):.2f}]")
+        # Debug: Check subject_ids
+        print(f"  Subject IDs: {subject_ids[:5]}... (first 5)")
+        print(f"  Unique subjects: {sorted(set(subject_ids))}")
+
+        # Denormalize targets to original scale
+        targets_array = np.array(targets_normalized)
+        if scaler is not None:
+            targets = scaler.inverse_transform(targets_array.reshape(-1, 1)).flatten()
+            print(f"  {len(graphs)} windows from {len(set(subject_ids))} subjects")
+            print(f"  Target range (normalized): [{np.min(targets_normalized):.2f}, {np.max(targets_normalized):.2f}]")
+            print(f"  Target range (original): [{np.min(targets):.2f}, {np.max(targets):.2f}]")
+        else:
+            targets = targets_array
+            print(f"  {len(graphs)} windows from {len(set(subject_ids))} subjects")
+            print(f"  WARNING: No scaler - targets remain normalized!")
 
         # Make predictions (predictions are denormalized in predict_split if scaler exists)
         predictions = predict_split(model, graphs, scaler, device)
@@ -319,13 +331,13 @@ def predict_fold(model_dir, fold_name, device, split='all'):
 
         print(f"  Metrics: r={metrics['r']:.4f}, MSE={metrics['mse']:.4f}, MAE={metrics['mae']:.4f}")
 
-        # Store results
+        # Store results (convert to lists for Excel compatibility)
         results[split_name] = {
-            'subject_ids': subject_ids,
-            'targets': targets,
-            'predictions': predictions,
-            'errors': np.array(predictions) - np.array(targets),
-            'absolute_errors': np.abs(np.array(predictions) - np.array(targets)),
+            'subject_ids': [int(sid) for sid in subject_ids],  # Ensure integers
+            'targets': targets.tolist() if isinstance(targets, np.ndarray) else list(targets),
+            'predictions': predictions.tolist() if isinstance(predictions, np.ndarray) else list(predictions),
+            'errors': (np.array(predictions) - np.array(targets)).tolist(),
+            'absolute_errors': np.abs(np.array(predictions) - np.array(targets)).tolist(),
             'metrics': metrics,
         }
 
