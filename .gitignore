@@ -6,3 +6,8 @@ data/folds_data
 
 results_gatv2_interpretable
 /results
+
+/results_gatv2_predictions
+/results_gin_grid
+results_gatv2_predictions_grid2
+results_gatv2_grid
