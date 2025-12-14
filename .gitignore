@@ -12,3 +12,5 @@ results_gatv2_interpretable
 results_gatv2_predictions_grid2
 results_gatv2_grid
 /.claude
+models\__pycache__
+utils\__pycache__
