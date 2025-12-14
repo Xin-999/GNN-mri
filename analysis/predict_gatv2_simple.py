@@ -85,6 +85,11 @@ def load_model_and_data(model_dir, fold_name, device='cpu'):
     val_2d = graphs_dict.get('val_graphs', [])
     test_2d = graphs_dict.get('test_graphs', [])
 
+    # Extract real subject indices
+    train_indices = graphs_dict.get('train_indices', [])
+    val_indices = graphs_dict.get('val_indices', [])
+    test_indices = graphs_dict.get('test_indices', [])
+
     # Get input dimension from first non-padded graph
     sample_graph = None
     # Convert numpy arrays to lists for iteration
@@ -151,36 +156,42 @@ def load_model_and_data(model_dir, fold_name, device='cpu'):
         'train_2d': train_2d,
         'val_2d': val_2d,
         'test_2d': test_2d,
+        'train_indices': train_indices,
+        'val_indices': val_indices,
+        'test_indices': test_indices,
     }, scaler, config
 
 
-def flatten_graphs(graphs_2d, split_name='split'):
+def flatten_graphs(graphs_2d, real_subject_indices=None, split_name='split'):
     """
     Flatten 2D graph list and extract subject IDs and targets.
 
     Args:
         graphs_2d: 2D list of graphs [subject][window]
+        real_subject_indices: Array of real subject IDs (optional)
         split_name: Name of this split
 
     Returns:
-        List of graphs, list of subject IDs, list of targets
+        List of graphs, list of real subject IDs, list of targets
     """
     graphs = []
     subject_ids = []
     targets = []
 
     for subj_idx, row in enumerate(graphs_2d):
+        # Get the real subject ID
+        if real_subject_indices is not None and subj_idx < len(real_subject_indices):
+            real_subject_id = int(real_subject_indices[subj_idx])
+        else:
+            real_subject_id = subj_idx  # Fallback to index if no real IDs available
+
         for window_idx, g in enumerate(row):
             # Skip padded graphs
             if hasattr(g, "pad") and bool(g.pad):
                 continue
 
-            # Add subject_id if not present
-            if not hasattr(g, 'subject_id'):
-                g.subject_id = torch.tensor([subj_idx], dtype=torch.long)
-
             graphs.append(g)
-            subject_ids.append(g.subject_id.item() if torch.is_tensor(g.subject_id) else g.subject_id)
+            subject_ids.append(real_subject_id)
             targets.append(g.y.item() if torch.is_tensor(g.y) else g.y)
 
     return graphs, subject_ids, targets
@@ -259,28 +270,27 @@ def predict_fold(model_dir, fold_name, device, split='all'):
     # Determine which splits to process
     splits_to_process = []
     if split == 'all':
-        splits_to_process = [('train', data_dict['train_2d']),
-                            ('val', data_dict['val_2d']),
-                            ('test', data_dict['test_2d'])]
+        splits_to_process = [('train', data_dict['train_2d'], data_dict['train_indices']),
+                            ('val', data_dict['val_2d'], data_dict['val_indices']),
+                            ('test', data_dict['test_2d'], data_dict['test_indices'])]
     else:
-        key = f"{split}_2d" if split != 'test' else 'test_2d'
         if split == 'train':
-            splits_to_process = [('train', data_dict['train_2d'])]
+            splits_to_process = [('train', data_dict['train_2d'], data_dict['train_indices'])]
         elif split == 'val':
-            splits_to_process = [('val', data_dict['val_2d'])]
+            splits_to_process = [('val', data_dict['val_2d'], data_dict['val_indices'])]
         elif split == 'test':
-            splits_to_process = [('test', data_dict['test_2d'])]
+            splits_to_process = [('test', data_dict['test_2d'], data_dict['test_indices'])]
 
     # Process each split
-    for split_name, graphs_2d in splits_to_process:
+    for split_name, graphs_2d, real_indices in splits_to_process:
         if len(graphs_2d) == 0:
             print(f"No {split_name} data available")
             continue
 
         print(f"\nPredicting {split_name} split...")
 
-        # Flatten graphs
-        graphs, subject_ids, targets = flatten_graphs(graphs_2d, split_name)
+        # Flatten graphs (with real subject IDs)
+        graphs, subject_ids, targets_normalized = flatten_graphs(graphs_2d, real_indices, split_name)
 
         if not graphs:
             print(f"No valid graphs in {split_name} split")
@@ -288,10 +298,16 @@ def predict_fold(model_dir, fold_name, device, split='all'):
 
         print(f"  {len(graphs)} windows from {len(set(subject_ids))} subjects")
 
-        # Make predictions
+        # Make predictions (predictions are denormalized in predict_split)
         predictions = predict_split(model, graphs, scaler, device)
 
-        # Calculate metrics
+        # Denormalize targets to match predictions
+        if scaler is not None:
+            targets = scaler.inverse_transform(np.array(targets_normalized).reshape(-1, 1)).flatten()
+        else:
+            targets = targets_normalized
+
+        # Calculate metrics (using denormalized values)
         metrics = calculate_metrics(targets, predictions)
 
         print(f"  Metrics: r={metrics['r']:.4f}, MSE={metrics['mse']:.4f}, MAE={metrics['mae']:.4f}")
