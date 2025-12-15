@@ -740,6 +740,24 @@ def run_grid_search(device):
     configs = generate_hyperparameter_grid()
     print(f"\nTotal configurations to try: {len(configs)}")
 
+    # Check how many configs are already completed
+    grid_results_dir = Path("../../results/gatv2/grid")
+    if not grid_results_dir.exists():
+        grid_results_dir = Path("results/gatv2/grid")
+
+    completed_configs = 0
+    if grid_results_dir.exists():
+        for config_idx, config in enumerate(configs, 1):
+            config_name = (f"h{config['hidden_dim']}_l{config['n_layers']}_"
+                          f"head{config['n_heads']}_d{config['dropout']}_"
+                          f"ed{config['edge_dropout']}_lr{config['lr']}")
+            aggregate_path = grid_results_dir / config_name / "gatv2_aggregate_summary.json"
+            if aggregate_path.exists():
+                completed_configs += 1
+
+    print(f"Already completed: {completed_configs} configurations")
+    print(f"Remaining: {len(configs) - completed_configs} configurations")
+
     # Find fold files
     fold_dir = Path("../../data/folds_data")
     if not fold_dir.exists():
@@ -756,8 +774,8 @@ def run_grid_search(device):
     )
 
     print(f"Number of folds: {len(fold_files)}")
-    print(f"\nEstimated time: {len(configs)} configs × {len(fold_files)} folds")
-    input("\nPress Enter to start grid search...")
+    print(f"\nEstimated time: {len(configs) - completed_configs} configs × {len(fold_files)} folds")
+    input("\nPress Enter to start/resume grid search...")
 
     # Store results for all configs
     all_config_results = []
@@ -783,6 +801,21 @@ def run_grid_search(device):
         if not OUTPUT_DIR.exists():
             OUTPUT_DIR = Path(f"results/gatv2/grid/{config_name}")
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+        # Check if this config is already completed
+        aggregate_summary_path = OUTPUT_DIR / "gatv2_aggregate_summary.json"
+        if aggregate_summary_path.exists():
+            print(f"⏭️  Config {config_idx} already completed - loading existing results")
+            try:
+                with open(aggregate_summary_path, 'r') as f:
+                    config_summary = json.load(f)
+                all_config_results.append(config_summary)
+                print(f"  Subject R: {config_summary['subject_level_r']['mean']:.4f} ± "
+                      f"{config_summary['subject_level_r']['std']:.4f}")
+                continue
+            except Exception as e:
+                print(f"⚠️  Error loading existing results: {e}")
+                print(f"  Will retrain this config...")
 
         # Train all folds with this config
         fold_results = []
