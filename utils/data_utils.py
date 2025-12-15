@@ -371,16 +371,16 @@ def save_predictions(
     scaler: Optional[object] = None,
 ):
     """
-    Save predictions to CSV with optional inverse normalization.
+    Save predictions to JSON with optional inverse normalization.
 
     Args:
         predictions: Predicted values (possibly normalized)
         targets: Ground truth values (possibly normalized)
         subject_ids: Subject identifiers
-        save_path: Path to save CSV
+        save_path: Path to save JSON
         scaler: Scaler object for inverse transform
     """
-    import pandas as pd
+    import json
 
     # Inverse transform if scaler provided
     if scaler is not None:
@@ -390,16 +390,22 @@ def save_predictions(
         pred_original = predictions
         target_original = targets
 
-    df = pd.DataFrame({
-        'subject_id': subject_ids,
-        'prediction': pred_original,
-        'target': target_original,
-        'prediction_normalized': predictions,
-        'target_normalized': targets,
-        'error': pred_original - target_original,
-    })
+    # Create list of prediction entries
+    predictions_list = []
+    for i in range(len(subject_ids)):
+        predictions_list.append({
+            'subject_id': int(subject_ids[i]),
+            'prediction': float(pred_original[i]),
+            'target': float(target_original[i]),
+            'prediction_normalized': float(predictions[i]),
+            'target_normalized': float(targets[i]),
+            'error': float(pred_original[i] - target_original[i]),
+        })
 
-    df.to_csv(save_path, index=False)
+    # Save as JSON
+    with open(save_path, 'w') as f:
+        json.dump(predictions_list, f, indent=2)
+
     print(f"Saved predictions to {save_path}")
 
 

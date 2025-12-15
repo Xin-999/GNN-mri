@@ -198,7 +198,7 @@ def main():
         metrics = evaluate_ensemble(
             ensemble,
             test_loader,
-            save_results=fold_output_dir / "ensemble_predictions.csv",
+            save_results=fold_output_dir / "ensemble_predictions.json",
         )
 
         # Save ensemble weights/model

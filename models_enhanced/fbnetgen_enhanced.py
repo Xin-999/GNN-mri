@@ -139,6 +139,7 @@ class EnhancedGNNPredictor(nn.Module):
                 heads=n_heads,
                 dropout=dropout,
                 concat=True,
+                edge_dim=1,  # Edge weights are scalar
             )
             for _ in range(n_layers)
         ])
@@ -181,7 +182,9 @@ class EnhancedGNNPredictor(nn.Module):
             identity = residual_proj(x)
 
             # GAT convolution
-            x = gat(x, edge_index, edge_attr=edge_weight)
+            # Reshape edge_weight from [E] to [E, 1] if provided
+            edge_attr_reshaped = edge_weight.unsqueeze(-1) if edge_weight is not None else None
+            x = gat(x, edge_index, edge_attr=edge_attr_reshaped)
 
             # PairNorm to prevent over-smoothing
             x = pairnorm(x)
@@ -414,7 +417,7 @@ class FBNetGenFromGraphEnhanced(nn.Module):
             nn.Linear(hidden_dim // 2, 1),
         )
 
-    def forward(self, data):
+    def forward(self, data, return_losses=False):
         x, edge_index, edge_attr, batch = data.x, data.edge_index, data.edge_attr, data.batch
 
         # Encode
@@ -436,7 +439,11 @@ class FBNetGenFromGraphEnhanced(nn.Module):
         # Regression
         out = self.head(x_pooled).squeeze(-1)
 
-        return out
+        if return_losses:
+            # No auxiliary losses for this simplified version
+            return out, {}
+        else:
+            return out
 
 
 def create_fbnetgen_enhanced(in_dim=268, from_graph=False, **kwargs):

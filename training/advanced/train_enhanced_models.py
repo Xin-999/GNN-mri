@@ -20,11 +20,16 @@ Key features:
 """
 
 import os
+import sys
 import argparse
 import json
 import time
 import datetime
 from pathlib import Path
+
+# Add project root to path so we can import modules
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
 
 import numpy as np
 import torch
@@ -227,16 +232,12 @@ def train_fold(model_name, fold_path, config, device):
     print(f"{'='*70}\n")
 
     # Load data with normalization
-    data_dict = load_graphs_with_normalization(
+    train_list, val_list, test_list, info = load_graphs_with_normalization(
         fold_path,
         normalize_method=config.get('normalize_method', 'standard'),
-        verbose=True
     )
 
-    train_list = data_dict['train_list']
-    val_list = data_dict['val_list']
-    test_list = data_dict['test_list']
-    scaler = data_dict['scaler']
+    scaler = info['scaler']
 
     # Create dataloaders
     train_loader, val_loader, test_loader = create_dataloaders(
@@ -370,7 +371,7 @@ def train_fold(model_name, fold_path, config, device):
         test_result['predictions'],
         test_result['targets'],
         test_result['subject_ids'],
-        output_dir / f"{model_name}_predictions.csv"
+        output_dir / f"{model_name}_predictions.json"
     )
 
     # Save comprehensive JSON summary
@@ -406,7 +407,21 @@ def train_fold(model_name, fold_path, config, device):
             'subject_level': test_result['subject_metrics'],
         },
 
-        'data_info': data_dict['data_info'],
+        'data_info': {
+            'n_train_samples': len(train_list),
+            'n_val_samples': len(val_list),
+            'n_test_samples': len(test_list),
+            'n_train_subjects': len(np.unique(info['train_subject_ids'])),
+            'n_val_subjects': len(np.unique(info['val_subject_ids'])),
+            'n_test_subjects': len(np.unique(info['test_subject_ids'])),
+            'input_dim': in_dim,
+            'target_range_original': {
+                'train': [float(info['train_targets_original'].min()),
+                         float(info['train_targets_original'].max())],
+                'test': [float(info['test_targets_original'].min()),
+                        float(info['test_targets_original'].max())],
+            },
+        },
 
         'history': history,
     }
@@ -628,6 +643,8 @@ def main():
             all_results.append(result)
         except Exception as e:
             print(f"Error training on {fold_dir}: {e}")
+            import traceback
+            traceback.print_exc()
             continue
 
     # Aggregate results

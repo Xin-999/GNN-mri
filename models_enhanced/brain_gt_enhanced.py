@@ -149,13 +149,13 @@ class EnhancedGraphAttentionLayer(nn.Module):
 
         # Apply DropEdge during training
         if training and self.edge_dropout > 0:
-            edge_index, edge_attr = dropout_edge(
+            edge_index, _ = dropout_edge(
                 edge_index,
-                edge_attr=edge_attr,
                 p=self.edge_dropout,
                 force_undirected=True,
                 training=True
             )
+            # Note: edge_attr remains unchanged (not dropped with edges)
 
         # Graph attention
         x = self.gat(x, edge_index, edge_attr=edge_attr)
@@ -354,7 +354,7 @@ class BrainGTEnhanced(nn.Module):
             nn.Linear(hidden_dim // 2, 1),
         )
 
-    def forward(self, data):
+    def forward(self, data, return_losses=False):
         x, edge_index, edge_attr, batch = data.x, data.edge_index, data.edge_attr, data.batch
 
         # Input projection
@@ -397,7 +397,11 @@ class BrainGTEnhanced(nn.Module):
         # Regression
         out = self.head(x_pooled)
 
-        return out.squeeze(-1)
+        if return_losses:
+            # No auxiliary losses for this version
+            return out.squeeze(-1), {}
+        else:
+            return out.squeeze(-1)
 
 
 def create_brain_gt_enhanced(in_dim=268, **kwargs):

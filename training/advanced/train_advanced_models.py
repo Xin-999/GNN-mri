@@ -18,10 +18,15 @@ Key features:
 """
 
 import os
+import sys
 import argparse
 import json
 import time
 from pathlib import Path
+
+# Add project root to path so we can import modules
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
 
 import numpy as np
 import torch
@@ -405,13 +410,13 @@ def train_model(
     save_predictions(
         test_preds, test_targets,
         info['test_subject_ids'],
-        output_dir / f"{model_name}_predictions.csv",
+        output_dir / f"{model_name}_predictions.json",
         scaler=info['scaler'],
     )
 
     print(f"\nResults saved to {output_dir}")
     print(f"  - Summary: {output_dir / f'{model_name}_summary.json'}")
-    print(f"  - Predictions: {output_dir / f'{model_name}_predictions.csv'}")
+    print(f"  - Predictions: {output_dir / f'{model_name}_predictions.json'}")
     print(f"  - Checkpoint: {output_dir / f'{model_name}_best.pt'}")
 
     return results, model
