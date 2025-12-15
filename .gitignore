@@ -14,3 +14,4 @@ results_gatv2_grid
 /.claude
 models\__pycache__
 utils\__pycache__
+models_enhanced\__pycache__
