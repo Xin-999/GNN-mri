@@ -149,13 +149,15 @@ class EnhancedGraphAttentionLayer(nn.Module):
 
         # Apply DropEdge during training
         if training and self.edge_dropout > 0:
-            edge_index, _ = dropout_edge(
+            edge_index, edge_mask = dropout_edge(
                 edge_index,
                 p=self.edge_dropout,
                 force_undirected=True,
                 training=True
             )
-            # Note: edge_attr remains unchanged (not dropped with edges)
+            # Also drop edge attributes to match dropped edges
+            if edge_attr is not None:
+                edge_attr = edge_attr[edge_mask]
 
         # Graph attention
         x = self.gat(x, edge_index, edge_attr=edge_attr)

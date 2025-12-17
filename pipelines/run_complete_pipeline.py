@@ -104,7 +104,7 @@ def generate_comparison_report(output_dir, project_root):
     # Generate report
     report_path = Path(output_dir) / "comparison_report.txt"
 
-    with open(report_path, 'w') as f:
+    with open(report_path, 'w', encoding='utf-8') as f:
         f.write("="*70 + "\n")
         f.write("MODEL COMPARISON REPORT\n")
         f.write("="*70 + "\n\n")

@@ -210,8 +210,11 @@ def evaluate(model, loader, criterion, device, scaler, model_name=''):
     # Subject-level metrics
     subj_metrics = None
     if all_subject_ids is not None:
-        subj_preds, subj_targets = aggregate_window_predictions(
-            all_preds_original, all_targets_original, all_subject_ids
+        subj_preds, _ = aggregate_window_predictions(
+            all_preds_original, all_subject_ids
+        )
+        subj_targets, _ = aggregate_window_predictions(
+            all_targets_original, all_subject_ids
         )
         subj_metrics = compute_metrics(subj_preds, subj_targets)
 

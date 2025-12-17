@@ -431,7 +431,7 @@ class FBNetGenFromGraphEnhanced(nn.Module):
         gate_weights = torch.softmax(gate_scores, dim=0)
 
         # Weighted sum per graph
-        x_pooled = torch.zeros(batch.max().item() + 1, self.gnn_predictor.n_layers, device=x.device)
+        x_pooled = torch.zeros(batch.max().item() + 1, x.size(1), device=x.device)
         for i in range(batch.max().item() + 1):
             mask = (batch == i)
             x_pooled[i] = (x[mask] * gate_weights[mask]).sum(dim=0)

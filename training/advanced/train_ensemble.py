@@ -187,7 +187,6 @@ def main():
                 val_loader,
                 n_epochs=args.optimize_epochs,
                 lr=0.01,
-                verbose=True,
             )
 
         # Evaluate on test set
