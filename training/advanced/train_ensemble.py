@@ -28,6 +28,19 @@ import torch
 
 from models.brain_gt import BrainGT
 from models.brain_gnn import SimpleBrainGNN
+
+
+# Custom JSON Encoder for Numpy/Torch types
+class NumpyEncoder(json.JSONEncoder):
+    """Custom encoder for numpy and torch data types."""
+    def default(self, obj):
+        if isinstance(obj, (np.integer, np.floating, np.bool_)):
+            return obj.item()
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, (torch.Tensor,)):
+            return obj.cpu().detach().numpy().tolist() if obj.numel() > 1 else obj.item()
+        return super(NumpyEncoder, self).default(obj)
 from models.fbnetgen import FBNetGenFromGraph
 from models.ensemble import load_ensemble_from_checkpoints, evaluate_ensemble
 
@@ -211,7 +224,7 @@ def main():
                 'ensemble_type': args.ensemble_type,
                 'models_used': list(available_models.keys()),
                 'metrics': metrics,
-            }, f, indent=2)
+            }, f, indent=2, cls=NumpyEncoder)
 
         all_ensemble_results.append(metrics)
 
@@ -238,7 +251,7 @@ def main():
                 'mean_r': float(mean_r),
                 'std_r': float(std_r),
                 'per_fold_results': all_ensemble_results,
-            }, f, indent=2)
+            }, f, indent=2, cls=NumpyEncoder)
 
         print(f"\nResults saved to {args.output_dir}")
 
