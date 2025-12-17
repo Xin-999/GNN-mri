@@ -18,3 +18,5 @@ results_gatv2_grid
 models/__pycache__/
 utils/__pycache__/
 models_enhanced/__pycache__/
+models/__pycache__
+/training/gatv2/__pycache__/
