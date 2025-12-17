@@ -14,6 +14,12 @@ This script:
 Usage:
     python run_complete_pipeline.py --epochs 100
     python run_complete_pipeline.py --quick_test  # Fast test run
+    
+    #BASE
+    python run_complete_pipeline.py --use_base --epochs 100 --device cuda
+    #ENHANCED
+    python run_complete_pipeline.py --use_enhanced --epochs 100 --device cuda
+    
 """
 
 import argparse
@@ -72,8 +78,11 @@ def generate_comparison_report(output_dir, project_root):
     results = {}
 
     for model in models:
-        # Check new reorganized path
-        result_file = project_root / f"results/advanced/{model}/{model}_aggregate_summary.json"
+        # Check enhanced path (primary)
+        result_file = project_root / f"results/enhanced/{model}_enhanced/{model}_aggregate_summary.json"
+        if not result_file.exists():
+            # Fallback to advanced path
+            result_file = project_root / f"results/advanced/{model}/{model}_aggregate_summary.json"
         if not result_file.exists():
             # Fallback to old path
             result_file = project_root / f"results_{model}_advanced/aggregate_results.json"
@@ -154,6 +163,12 @@ def main():
     parser.add_argument('--device', type=str, default='cuda',
                         choices=['cuda', 'cpu'])
 
+    # Model selection
+    parser.add_argument('--use_enhanced', action='store_true', default=True,
+                        help='Use enhanced models (default: True)')
+    parser.add_argument('--use_base', dest='use_enhanced', action='store_false',
+                        help='Use base models instead of enhanced')
+
     # What to run
     parser.add_argument('--skip_training', action='store_true',
                         help='Skip model training (only ensemble)')
@@ -172,7 +187,7 @@ def main():
     # Configuration
     if args.quick_test:
         print("\n*** QUICK TEST MODE - Using reduced settings ***\n")
-        epochs = 10
+        epochs = 2
         # Use a valid fold (not the corrupted graphs_outer1_inner1)
         fold_arg = ['--fold_name', 'graphs_outer1_inner2']
     else:
@@ -185,10 +200,20 @@ def main():
 
     success_log = []
 
+    # Determine which training script and labels to use
+    if args.use_enhanced:
+        train_script = 'training/advanced/train_enhanced_models.py'
+        model_suffix = ' Enhanced'
+        results_dir = 'enhanced'
+    else:
+        train_script = 'training/advanced/train_advanced_models.py'
+        model_suffix = ''
+        results_dir = 'advanced'
+
     # Step 1: Train BrainGT
     if not args.skip_training:
         cmd = [
-            sys.executable, 'training/advanced/train_advanced_models.py',
+            sys.executable, train_script,
             '--model', 'braingt',
             '--epochs', str(epochs),
             '--hidden_dim', '128',
@@ -198,12 +223,12 @@ def main():
             '--device', args.device,
         ] + fold_arg
 
-        success = run_command(cmd, "Training BrainGT (Graph Transformer)", cwd=project_root)
-        success_log.append(('BrainGT', success))
+        success = run_command(cmd, f"Training BrainGT{model_suffix} (Graph Transformer)", cwd=project_root)
+        success_log.append((f'BrainGT{model_suffix}', success))
 
         # Step 2: Train BrainGNN
         cmd = [
-            sys.executable, 'training/advanced/train_advanced_models.py',
+            sys.executable, train_script,
             '--model', 'braingnn',
             '--epochs', str(epochs),
             '--hidden_dim', '128',
@@ -212,12 +237,12 @@ def main():
             '--device', args.device,
         ] + fold_arg
 
-        success = run_command(cmd, "Training BrainGNN (ROI-Aware)", cwd=project_root)
-        success_log.append(('BrainGNN', success))
+        success = run_command(cmd, f"Training BrainGNN{model_suffix} (ROI-Aware)", cwd=project_root)
+        success_log.append((f'BrainGNN{model_suffix}', success))
 
         # Step 3: Train FBNetGen
         cmd = [
-            sys.executable, 'training/advanced/train_advanced_models.py',
+            sys.executable, train_script,
             '--model', 'fbnetgen',
             '--epochs', str(epochs),
             '--hidden_dim', '128',
@@ -227,8 +252,8 @@ def main():
             '--device', args.device,
         ] + fold_arg
 
-        success = run_command(cmd, "Training FBNetGen (Task-Aware)", cwd=project_root)
-        success_log.append(('FBNetGen', success))
+        success = run_command(cmd, f"Training FBNetGen{model_suffix} (Task-Aware)", cwd=project_root)
+        success_log.append((f'FBNetGen{model_suffix}', success))
 
     # Step 4: Create Ensemble
     if not args.skip_ensemble:
@@ -259,9 +284,14 @@ def main():
     if all_success:
         print(f"\n🎉 All steps completed successfully!")
         print(f"\nResults saved in:")
-        print(f"  - results/advanced/braingt/")
-        print(f"  - results/advanced/braingnn/")
-        print(f"  - results/advanced/fbnetgen/")
+        if args.use_enhanced:
+            print(f"  - results/enhanced/braingt_enhanced/")
+            print(f"  - results/enhanced/braingnn_enhanced/")
+            print(f"  - results/enhanced/fbnetgen_enhanced/")
+        else:
+            print(f"  - results/advanced/braingt/")
+            print(f"  - results/advanced/braingnn/")
+            print(f"  - results/advanced/fbnetgen/")
         print(f"  - results/ensemble/")
         print(f"  - {args.output_dir}/comparison_report.txt")
     else:
