@@ -146,7 +146,7 @@ def generate_comparison_report(output_dir, project_root):
     print(f"Report saved to: {report_path}")
 
     # Print to console
-    with open(report_path) as f:
+    with open(report_path, encoding='utf-8') as f:
         print(f.read())
 
 

@@ -313,11 +313,12 @@ def train_fold(model_name, fold_path, config, device):
 
         # Print progress
         epoch_time = time.time() - epoch_start
+        subj_r = val_result['subject_metrics']['r'] if val_result['subject_metrics'] else 0.0
         print(f"Epoch {epoch:03d}/{config['epochs']:03d} | "
               f"Train Loss: {train_result['total_loss']:.4f} | "
               f"Val Loss: {val_result['loss']:.4f} | "
               f"Win r: {val_result['window_metrics']['r']:.4f} | "
-              f"Subj r: {val_result['subject_metrics']['r']:.4f if val_result['subject_metrics'] else 0:.4f} | "
+              f"Subj r: {subj_r:.4f} | "
               f"Time: {epoch_time:.1f}s")
 
         # Early stopping based on subject-level correlation

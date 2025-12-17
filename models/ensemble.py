@@ -161,7 +161,8 @@ class EnsembleModel:
         self,
         val_loader,
         n_epochs: int = 100,
-        lr: float = 0.01
+        lr: float = 0.01,
+        verbose: bool = False
     ):
         """
         Optimize ensemble weights on validation set.
