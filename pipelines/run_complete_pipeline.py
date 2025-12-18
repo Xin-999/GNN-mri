@@ -14,12 +14,15 @@ This script:
 Usage:
     python run_complete_pipeline.py --epochs 100
     python run_complete_pipeline.py --quick_test  # Fast test run
-    
-    #BASE
+
+    # Train specific models only
+    python run_complete_pipeline.py --models braingnn fbnetgen --epochs 100
+    python run_complete_pipeline.py --models fbnetgen --quick_test
+
+    # BASE vs ENHANCED
     python run_complete_pipeline.py --use_base --epochs 100 --device cuda
-    #ENHANCED
     python run_complete_pipeline.py --use_enhanced --epochs 100 --device cuda
-    
+
 """
 
 import argparse
@@ -168,6 +171,10 @@ def main():
                         help='Use enhanced models (default: True)')
     parser.add_argument('--use_base', dest='use_enhanced', action='store_false',
                         help='Use base models instead of enhanced')
+    parser.add_argument('--models', nargs='+',
+                        choices=['braingt', 'braingnn', 'fbnetgen'],
+                        default=['braingt', 'braingnn', 'fbnetgen'],
+                        help='Which models to train (default: all three)')
 
     # What to run
     parser.add_argument('--skip_training', action='store_true',
@@ -210,50 +217,54 @@ def main():
         model_suffix = ''
         results_dir = 'advanced'
 
-    # Step 1: Train BrainGT
+    # Train selected models
     if not args.skip_training:
-        cmd = [
-            sys.executable, train_script,
-            '--model', 'braingt',
-            '--epochs', str(epochs),
-            '--hidden_dim', '128',
-            '--n_heads', '8',
-            '--lr', '1e-4',
-            '--dropout', '0.2',
-            '--device', args.device,
-        ] + fold_arg
+        # Step 1: Train BrainGT (if selected)
+        if 'braingt' in args.models:
+            cmd = [
+                sys.executable, train_script,
+                '--model', 'braingt',
+                '--epochs', str(epochs),
+                '--hidden_dim', '128',
+                '--n_heads', '8',
+                '--lr', '1e-4',
+                '--dropout', '0.2',
+                '--device', args.device,
+            ] + fold_arg
 
-        success = run_command(cmd, f"Training BrainGT{model_suffix} (Graph Transformer)", cwd=project_root)
-        success_log.append((f'BrainGT{model_suffix}', success))
+            success = run_command(cmd, f"Training BrainGT{model_suffix} (Graph Transformer)", cwd=project_root)
+            success_log.append((f'BrainGT{model_suffix}', success))
 
-        # Step 2: Train BrainGNN
-        cmd = [
-            sys.executable, train_script,
-            '--model', 'braingnn',
-            '--epochs', str(epochs),
-            '--hidden_dim', '128',
-            '--n_layers', '3',
-            '--dropout', '0.3',
-            '--device', args.device,
-        ] + fold_arg
+        # Step 2: Train BrainGNN (if selected)
+        if 'braingnn' in args.models:
+            cmd = [
+                sys.executable, train_script,
+                '--model', 'braingnn',
+                '--epochs', str(epochs),
+                '--hidden_dim', '128',
+                '--n_layers', '3',
+                '--dropout', '0.3',
+                '--device', args.device,
+            ] + fold_arg
 
-        success = run_command(cmd, f"Training BrainGNN{model_suffix} (ROI-Aware)", cwd=project_root)
-        success_log.append((f'BrainGNN{model_suffix}', success))
+            success = run_command(cmd, f"Training BrainGNN{model_suffix} (ROI-Aware)", cwd=project_root)
+            success_log.append((f'BrainGNN{model_suffix}', success))
 
-        # Step 3: Train FBNetGen
-        cmd = [
-            sys.executable, train_script,
-            '--model', 'fbnetgen',
-            '--epochs', str(epochs),
-            '--hidden_dim', '128',
-            '--n_layers', '3',
-            '--n_heads', '4',
-            '--dropout', '0.3',
-            '--device', args.device,
-        ] + fold_arg
+        # Step 3: Train FBNetGen (if selected)
+        if 'fbnetgen' in args.models:
+            cmd = [
+                sys.executable, train_script,
+                '--model', 'fbnetgen',
+                '--epochs', str(epochs),
+                '--hidden_dim', '128',
+                '--n_layers', '3',
+                '--n_heads', '4',
+                '--dropout', '0.3',
+                '--device', args.device,
+            ] + fold_arg
 
-        success = run_command(cmd, f"Training FBNetGen{model_suffix} (Task-Aware)", cwd=project_root)
-        success_log.append((f'FBNetGen{model_suffix}', success))
+            success = run_command(cmd, f"Training FBNetGen{model_suffix} (Task-Aware)", cwd=project_root)
+            success_log.append((f'FBNetGen{model_suffix}', success))
 
     # Step 4: Create Ensemble
     if not args.skip_ensemble:
