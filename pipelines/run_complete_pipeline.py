@@ -18,6 +18,7 @@ Usage:
     # Train specific models only
     python run_complete_pipeline.py --models braingnn fbnetgen --epochs 100
     python run_complete_pipeline.py --models fbnetgen --quick_test
+    python pipelines/run_complete_pipeline.py --models braingnn fbnetgen --epochs 50 --device cuda
 
     # BASE vs ENHANCED
     python run_complete_pipeline.py --use_base --epochs 100 --device cuda
