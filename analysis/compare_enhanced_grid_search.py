@@ -66,9 +66,18 @@ def load_grid_search_results(grid_dir=None):
                 with open(config_file) as f:
                     config = json.load(f)
 
-                # Extract metrics
-                subj_metrics = summary.get('subject_level', {})
-                win_metrics = summary.get('window_level', {})
+                # Extract metrics - enhanced models use 'subject_level_aggregate' structure
+                subj_agg = summary.get('subject_level_aggregate', {})
+                win_agg = summary.get('window_level_aggregate', {})
+
+                # Extract mean and std from nested structure
+                subject_r = subj_agg.get('r', {}).get('mean', 0) if isinstance(subj_agg.get('r'), dict) else subj_agg.get('r', 0)
+                subject_r_std = subj_agg.get('r', {}).get('std', 0) if isinstance(subj_agg.get('r'), dict) else 0
+                subject_mse = subj_agg.get('mse', {}).get('mean', float('inf')) if isinstance(subj_agg.get('mse'), dict) else subj_agg.get('mse', float('inf'))
+                subject_mae = subj_agg.get('mae', {}).get('mean', float('inf')) if isinstance(subj_agg.get('mae'), dict) else subj_agg.get('mae', float('inf'))
+
+                window_r = win_agg.get('r', {}).get('mean', 0) if isinstance(win_agg.get('r'), dict) else win_agg.get('r', 0)
+                window_mse = win_agg.get('mse', {}).get('mean', float('inf')) if isinstance(win_agg.get('mse'), dict) else win_agg.get('mse', float('inf'))
 
                 result = {
                     'model': model_name.upper(),
@@ -79,12 +88,12 @@ def load_grid_search_results(grid_dir=None):
                     'n_layers': config.get('n_layers'),
                     'n_heads': config.get('n_heads'),
                     'epochs': config.get('epochs'),
-                    'subject_r': subj_metrics.get('r', 0),
-                    'subject_r_std': subj_metrics.get('r', 0),  # Placeholder
-                    'subject_mse': subj_metrics.get('mse', float('inf')),
-                    'subject_mae': subj_metrics.get('mae', float('inf')),
-                    'window_r': win_metrics.get('r', 0),
-                    'window_mse': win_metrics.get('mse', float('inf')),
+                    'subject_r': subject_r,
+                    'subject_r_std': subject_r_std,
+                    'subject_mse': subject_mse,
+                    'subject_mae': subject_mae,
+                    'window_r': window_r,
+                    'window_mse': window_mse,
                 }
 
                 all_results.append(result)

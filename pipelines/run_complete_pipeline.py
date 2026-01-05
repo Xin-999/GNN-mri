@@ -268,95 +268,174 @@ def generate_base_vs_enhanced_comparison(project_root, models, output_path, fold
     print("="*70 + "\n")
 
     comparison_data = []
+    per_fold_data = {}  # Store per-fold results for full CV
 
     for model_name in models:
         model_upper = model_name.upper()
 
-        # Load base results (per-fold for quick test)
+        base_metrics = {}
+        enhanced_metrics = {}
+        base_metrics_std = {}
+        enhanced_metrics_std = {}
+
+        # === Load Base Results ===
         if fold_name:
-            # Try multiple possible paths
+            # Quick test mode - single fold
             base_paths = [
                 project_root / f'results/advanced/{model_name}/{fold_name}/{model_name}_summary.json',
                 project_root / f'results/advanced/{model_name}/{fold_name}.pkl/{model_name}_summary.json',
                 Path(f'results/advanced/{model_name}/{fold_name}/{model_name}_summary.json'),
                 Path(f'../../results/advanced/{model_name}/{fold_name}/{model_name}_summary.json'),
             ]
+
+            base_file = None
+            for path in base_paths:
+                print(f"Checking base path: {path}")
+                if path.exists():
+                    base_file = path
+                    print(f"  ✓ Found!")
+                    break
+
+            if base_file:
+                with open(base_file) as f:
+                    base_summary = json.load(f)
+
+                    # Extract metrics from various possible structures
+                    if 'subject_metrics' in base_summary:
+                        base_metrics = base_summary['subject_metrics']
+                    elif 'subject_level' in base_summary:
+                        base_metrics = base_summary['subject_level']
+                    elif 'test_metrics' in base_summary and isinstance(base_summary['test_metrics'], dict):
+                        if 'subject_level' in base_summary['test_metrics']:
+                            base_metrics = base_summary['test_metrics']['subject_level']
+
+                print(f"  Base metrics: r={base_metrics.get('r', 'N/A')}, mse={base_metrics.get('mse', 'N/A')}")
+            else:
+                print(f"  ✗ Base file not found!")
+
         else:
-            base_paths = [
-                project_root / f'results/advanced/{model_name}/{model_name}_aggregate_summary.json',
-            ]
+            # Full CV mode - aggregate across all folds
+            print(f"Loading all folds for {model_name} base model...")
+            base_model_dir = project_root / f'results/advanced/{model_name}'
 
-        # Load enhanced results (aggregate)
-        enhanced_file = project_root / f'results/enhanced/{model_name}_enhanced/{model_name}_aggregate_summary.json'
+            if base_model_dir.exists():
+                fold_metrics = {'r': [], 'mse': [], 'mae': []}
+                fold_details = []
 
-        base_metrics = {}
-        enhanced_metrics = {}
+                # Find all fold directories
+                for fold_dir in sorted(base_model_dir.iterdir()):
+                    if fold_dir.is_dir():
+                        summary_paths = [
+                            fold_dir / f'{model_name}_summary.json',
+                            fold_dir / f'{model_name}_test_summary.json',
+                        ]
 
-        # Try to find base file
-        base_file = None
-        for path in base_paths:
-            print(f"Checking base path: {path}")
-            if path.exists():
-                base_file = path
-                print(f"  ✓ Found!")
-                break
+                        for summary_path in summary_paths:
+                            if summary_path.exists():
+                                with open(summary_path) as f:
+                                    fold_summary = json.load(f)
 
-        if base_file:
-            with open(base_file) as f:
-                base_summary = json.load(f)
-                print(f"  Base JSON keys: {list(base_summary.keys())}")
+                                    # Extract metrics
+                                    fold_base_metrics = None
+                                    if 'subject_metrics' in fold_summary:
+                                        fold_base_metrics = fold_summary['subject_metrics']
+                                    elif 'subject_level' in fold_summary:
+                                        fold_base_metrics = fold_summary['subject_level']
+                                    elif 'test_metrics' in fold_summary and isinstance(fold_summary['test_metrics'], dict):
+                                        if 'subject_level' in fold_summary['test_metrics']:
+                                            fold_base_metrics = fold_summary['test_metrics']['subject_level']
 
-                # For per-fold base results - try different key structures
-                if 'subject_metrics' in base_summary:
-                    base_metrics = base_summary['subject_metrics']
-                    print(f"    Using 'subject_metrics'")
-                elif 'subject_level' in base_summary:
-                    base_metrics = base_summary['subject_level']
-                    print(f"    Using 'subject_level'")
-                elif 'test_metrics' in base_summary and isinstance(base_summary['test_metrics'], dict):
-                    if 'subject_level' in base_summary['test_metrics']:
-                        base_metrics = base_summary['test_metrics']['subject_level']
-                        print(f"    Using 'test_metrics' -> 'subject_level'")
+                                    if fold_base_metrics and 'r' in fold_base_metrics:
+                                        fold_metrics['r'].append(fold_base_metrics.get('r', 0))
+                                        fold_metrics['mse'].append(fold_base_metrics.get('mse', float('inf')))
+                                        fold_metrics['mae'].append(fold_base_metrics.get('mae', float('inf')))
+                                        fold_details.append({
+                                            'fold': fold_dir.name,
+                                            'r': fold_base_metrics.get('r', 0),
+                                            'mse': fold_base_metrics.get('mse', float('inf')),
+                                        })
+                                break
+
+                # Compute aggregates
+                if fold_metrics['r']:
+                    import numpy as np
+                    base_metrics = {
+                        'r': np.mean(fold_metrics['r']),
+                        'mse': np.mean(fold_metrics['mse']),
+                        'mae': np.mean(fold_metrics['mae']),
+                    }
+                    base_metrics_std = {
+                        'r': np.std(fold_metrics['r']),
+                        'mse': np.std(fold_metrics['mse']),
+                        'mae': np.std(fold_metrics['mae']),
+                    }
+                    per_fold_data[f'{model_name}_base'] = fold_details
+                    print(f"  Loaded {len(fold_metrics['r'])} folds")
+                    print(f"  Base mean r: {base_metrics['r']:.4f} ± {base_metrics_std['r']:.4f}")
                 else:
-                    # Try to find any dict with 'r' and 'mse' keys
-                    for key, value in base_summary.items():
-                        if isinstance(value, dict) and 'r' in value and 'mse' in value:
-                            base_metrics = value
-                            print(f"    Found metrics in '{key}'")
-                            break
+                    print(f"  ✗ No valid fold results found!")
+            else:
+                print(f"  ✗ Base model directory not found: {base_model_dir}")
 
-            print(f"  Base metrics: r={base_metrics.get('r', 'N/A')}, mse={base_metrics.get('mse', 'N/A')}")
-        else:
-            print(f"  ✗ Base file not found in any location!")
+        # === Load Enhanced Results ===
+        enhanced_file = project_root / f'results/enhanced/{model_name}_enhanced/{model_name}_aggregate_summary.json'
 
         if enhanced_file.exists():
             with open(enhanced_file) as f:
                 enhanced_summary = json.load(f)
-                # Enhanced models use subject_level_aggregate with mean/std structure
+
+                # Enhanced models have aggregate statistics built-in
                 subject_agg = enhanced_summary.get('subject_level_aggregate', {})
                 if subject_agg:
                     enhanced_metrics = {
                         'r': subject_agg.get('r', {}).get('mean', 0),
                         'mse': subject_agg.get('mse', {}).get('mean', float('inf')),
+                        'mae': subject_agg.get('mae', {}).get('mean', float('inf')),
                     }
-                else:
-                    enhanced_metrics = {}
-            print(f"  Enhanced metrics found: r={enhanced_metrics.get('r', 'N/A')}")
-        else:
-            print(f"  Enhanced file not found!")
+                    enhanced_metrics_std = {
+                        'r': subject_agg.get('r', {}).get('std', 0),
+                        'mse': subject_agg.get('mse', {}).get('std', 0),
+                        'mae': subject_agg.get('mae', {}).get('std', 0),
+                    }
 
+                    # Get per-fold details if available
+                    if 'per_fold_summary' in enhanced_summary:
+                        fold_details = []
+                        for fold_info in enhanced_summary['per_fold_summary']:
+                            if 'subject_level' in fold_info:
+                                fold_details.append({
+                                    'fold': fold_info.get('fold', 'unknown'),
+                                    'r': fold_info['subject_level'].get('r', 0),
+                                    'mse': fold_info['subject_level'].get('mse', float('inf')),
+                                })
+                        per_fold_data[f'{model_name}_enhanced'] = fold_details
+
+                    print(f"  Enhanced mean r: {enhanced_metrics['r']:.4f} ± {enhanced_metrics_std['r']:.4f}")
+        else:
+            print(f"  Enhanced file not found: {enhanced_file}")
+
+        # === Store Comparison Data ===
         if base_metrics or enhanced_metrics:
             base_r = base_metrics.get('r', 0) if base_metrics else 0
             base_mse = base_metrics.get('mse', float('inf')) if base_metrics else float('inf')
             enhanced_r = enhanced_metrics.get('r', 0) if enhanced_metrics else 0
             enhanced_mse = enhanced_metrics.get('mse', float('inf')) if enhanced_metrics else float('inf')
 
+            base_r_std = base_metrics_std.get('r', 0) if base_metrics_std else 0
+            base_mse_std = base_metrics_std.get('mse', 0) if base_metrics_std else 0
+            enhanced_r_std = enhanced_metrics_std.get('r', 0) if enhanced_metrics_std else 0
+            enhanced_mse_std = enhanced_metrics_std.get('mse', 0) if enhanced_metrics_std else 0
+
             comparison_data.append({
                 'model': model_upper,
                 'base_r': base_r,
+                'base_r_std': base_r_std,
                 'enhanced_r': enhanced_r,
+                'enhanced_r_std': enhanced_r_std,
                 'base_mse': base_mse,
+                'base_mse_std': base_mse_std,
                 'enhanced_mse': enhanced_mse,
+                'enhanced_mse_std': enhanced_mse_std,
                 'improvement_r': enhanced_r - base_r,
                 'improvement_mse': base_mse - enhanced_mse,
             })
@@ -365,36 +444,108 @@ def generate_base_vs_enhanced_comparison(project_root, models, output_path, fold
     report_path = output_path / 'base_vs_enhanced_comparison.txt'
 
     with open(report_path, 'w', encoding='utf-8') as f:
-        f.write("="*70 + "\n")
+        f.write("="*90 + "\n")
         f.write("BASE vs ENHANCED MODELS COMPARISON\n")
-        f.write("="*70 + "\n\n")
+        f.write("="*90 + "\n\n")
 
-        f.write("Performance Comparison (Subject-Level Metrics):\n")
-        f.write("-"*70 + "\n")
-        f.write(f"{'Model':<15} {'Base r':<12} {'Enhanced r':<12} {'Improvement':<12}\n")
-        f.write("-"*70 + "\n")
+        # Add fold information
+        if fold_name:
+            f.write(f"Evaluation Mode: Quick Test (Single Fold)\n")
+            f.write(f"Fold: {fold_name}\n")
+            f.write(f"Note: Single fold evaluation - no standard deviation available\n")
+        else:
+            f.write(f"Evaluation Mode: Full Cross-Validation\n")
+            f.write(f"Folds: 25 folds (5×5 nested cross-validation)\n")
+            f.write(f"Format: Mean ± Std across all folds\n")
+        f.write("\n" + "="*90 + "\n\n")
 
-        for data in comparison_data:
-            f.write(f"{data['model']:<15} "
-                   f"{data['base_r']:<12.4f} "
-                   f"{data['enhanced_r']:<12.4f} "
-                   f"{data['improvement_r']:+.4f}\n")
+        # === Subject-Level Correlation Comparison ===
+        f.write("Subject-Level Correlation (r) - Higher is Better:\n")
+        f.write("-"*90 + "\n")
 
-        f.write("\n" + "="*70 + "\n")
-        f.write("\nMSE Comparison (Lower is Better):\n")
-        f.write("-"*70 + "\n")
-        f.write(f"{'Model':<15} {'Base MSE':<12} {'Enhanced MSE':<12} {'Reduction':<12}\n")
-        f.write("-"*70 + "\n")
+        if fold_name:
+            # Single fold format
+            f.write(f"{'Model':<15} {'Base r':<20} {'Enhanced r':<20} {'Improvement':<15}\n")
+            f.write("-"*90 + "\n")
+            for data in comparison_data:
+                f.write(f"{data['model']:<15} "
+                       f"{data['base_r']:<20.4f} "
+                       f"{data['enhanced_r']:<20.4f} "
+                       f"{data['improvement_r']:+.4f}\n")
+        else:
+            # Multi-fold format with Mean ± Std
+            f.write(f"{'Model':<15} {'Base r':<25} {'Enhanced r':<25} {'Improvement':<15}\n")
+            f.write("-"*90 + "\n")
+            for data in comparison_data:
+                base_str = f"{data['base_r']:.4f} ± {data['base_r_std']:.4f}"
+                enhanced_str = f"{data['enhanced_r']:.4f} ± {data['enhanced_r_std']:.4f}"
+                f.write(f"{data['model']:<15} "
+                       f"{base_str:<25} "
+                       f"{enhanced_str:<25} "
+                       f"{data['improvement_r']:+.4f}\n")
 
-        for data in comparison_data:
-            f.write(f"{data['model']:<15} "
-                   f"{data['base_mse']:<12.4f} "
-                   f"{data['enhanced_mse']:<12.4f} "
-                   f"{data['improvement_mse']:+.4f}\n")
+        # === MSE Comparison ===
+        f.write("\n" + "="*90 + "\n")
+        f.write("\nSubject-Level MSE - Lower is Better:\n")
+        f.write("-"*90 + "\n")
 
-        f.write("\n" + "="*70 + "\n")
-        f.write("\nSummary:\n")
-        f.write("-"*70 + "\n")
+        if fold_name:
+            # Single fold format
+            f.write(f"{'Model':<15} {'Base MSE':<20} {'Enhanced MSE':<20} {'Reduction':<15}\n")
+            f.write("-"*90 + "\n")
+            for data in comparison_data:
+                f.write(f"{data['model']:<15} "
+                       f"{data['base_mse']:<20.4f} "
+                       f"{data['enhanced_mse']:<20.4f} "
+                       f"{data['improvement_mse']:+.4f}\n")
+        else:
+            # Multi-fold format with Mean ± Std
+            f.write(f"{'Model':<15} {'Base MSE':<25} {'Enhanced MSE':<25} {'Reduction':<15}\n")
+            f.write("-"*90 + "\n")
+            for data in comparison_data:
+                base_str = f"{data['base_mse']:.4f} ± {data['base_mse_std']:.4f}"
+                enhanced_str = f"{data['enhanced_mse']:.4f} ± {data['enhanced_mse_std']:.4f}"
+                f.write(f"{data['model']:<15} "
+                       f"{base_str:<25} "
+                       f"{enhanced_str:<25} "
+                       f"{data['improvement_mse']:+.4f}\n")
+
+        # === Per-Fold Breakdown ===
+        if not fold_name and per_fold_data:
+            f.write("\n" + "="*90 + "\n")
+            f.write("\nPER-FOLD BREAKDOWN:\n")
+            f.write("="*90 + "\n")
+
+            for model_name in models:
+                model_upper = model_name.upper()
+                base_key = f'{model_name}_base'
+                enhanced_key = f'{model_name}_enhanced'
+
+                if base_key in per_fold_data or enhanced_key in per_fold_data:
+                    f.write(f"\n{model_upper}:\n")
+                    f.write("-"*90 + "\n")
+                    f.write(f"{'Fold':<30} {'Base r':<15} {'Enhanced r':<15} {'Improvement':<15}\n")
+                    f.write("-"*90 + "\n")
+
+                    base_folds = {fold['fold']: fold for fold in per_fold_data.get(base_key, [])}
+                    enhanced_folds = {fold['fold']: fold for fold in per_fold_data.get(enhanced_key, [])}
+
+                    all_fold_names = sorted(set(base_folds.keys()) | set(enhanced_folds.keys()))
+
+                    for fold in all_fold_names:
+                        base_r = base_folds[fold]['r'] if fold in base_folds else 0.0
+                        enhanced_r = enhanced_folds[fold]['r'] if fold in enhanced_folds else 0.0
+                        improvement = enhanced_r - base_r
+
+                        f.write(f"{fold:<30} "
+                               f"{base_r:<15.4f} "
+                               f"{enhanced_r:<15.4f} "
+                               f"{improvement:+.4f}\n")
+
+        # === Summary ===
+        f.write("\n" + "="*90 + "\n")
+        f.write("\nSUMMARY:\n")
+        f.write("-"*90 + "\n")
 
         avg_improvement_r = sum(d['improvement_r'] for d in comparison_data) / len(comparison_data) if comparison_data else 0
         if avg_improvement_r > 0:
