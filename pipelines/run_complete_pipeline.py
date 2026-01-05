@@ -75,13 +75,13 @@ def run_command(cmd, description, cwd=None):
         return False
 
 
-def generate_comparison_report(output_dir, project_root):
-    """Generate a comparison report of all models."""
+def generate_comparison_report(output_dir, project_root, selected_models=None):
+    """Generate a comparison report of selected models."""
     print(f"\n{'='*70}")
     print("GENERATING COMPARISON REPORT")
     print(f"{'='*70}\n")
 
-    models = ['braingt', 'braingnn', 'fbnetgen']
+    models = selected_models if selected_models else ['braingt', 'braingnn', 'fbnetgen']
     results = {}
 
     for model in models:
@@ -524,18 +524,35 @@ def main():
 
     # Step 4: Create Ensemble
     if not args.skip_ensemble:
+        # Set correct model directories based on base vs enhanced
+        if args.use_enhanced:
+            model_dirs = {
+                'braingt': 'results/enhanced/braingt_enhanced',
+                'braingnn': 'results/enhanced/braingnn_enhanced',
+                'fbnetgen': 'results/enhanced/fbnetgen_enhanced',
+            }
+        else:
+            model_dirs = {
+                'braingt': 'results/advanced/braingt',
+                'braingnn': 'results/advanced/braingnn',
+                'fbnetgen': 'results/advanced/fbnetgen',
+            }
+
         cmd = [
             sys.executable, 'training/advanced/train_ensemble.py',
             '--ensemble_type', 'weighted',
             '--optimize_epochs', '100',
             '--device', args.device,
+            '--braingt_dir', model_dirs['braingt'],
+            '--braingnn_dir', model_dirs['braingnn'],
+            '--fbnetgen_dir', model_dirs['fbnetgen'],
         ] + fold_arg
 
         success = run_command(cmd, "Creating Weighted Ensemble", cwd=project_root)
         success_log.append(('Ensemble', success))
 
     # Generate comparison report
-    generate_comparison_report(output_path, project_root)
+    generate_comparison_report(output_path, project_root, selected_models=args.models)
 
     # Final summary
     print(f"\n{'='*70}")
