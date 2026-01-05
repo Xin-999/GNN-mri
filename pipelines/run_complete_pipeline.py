@@ -5,9 +5,9 @@ Complete Training Pipeline - One Click Solution
 Runs the entire advanced GNN training pipeline automatically.
 
 This script:
-1. Trains BrainGT (Graph Transformer)
-2. Trains BrainGNN (ROI-aware)
-3. Trains FBNetGen (Task-aware)
+1. Trains BrainGT (Graph Transformer) (Parameters: 1,216,770)
+2. Trains BrainGNN (ROI-aware) (Parameters: 418,302)
+3. Trains FBNetGen (Task-aware) (Parameters: 176,514)
 4. Creates weighted ensemble
 5. Generates comparison report
 
@@ -18,11 +18,14 @@ Usage:
     # Train specific models only
     python run_complete_pipeline.py --models braingnn fbnetgen --epochs 100
     python run_complete_pipeline.py --models fbnetgen --quick_test
-    python pipelines/run_complete_pipeline.py --models braingnn fbnetgen --epochs 50 --device cuda
 
     # BASE vs ENHANCED
     python run_complete_pipeline.py --use_base --epochs 100 --device cuda
     python run_complete_pipeline.py --use_enhanced --epochs 100 --device cuda
+
+    # COMPARE BASE and ENHANCED (runs both automatically!)
+    python run_complete_pipeline.py --compare_base_enhanced --quick_test
+    python run_complete_pipeline.py --compare_base_enhanced --models braingnn fbnetgen --epochs 100
 
 """
 
@@ -154,6 +157,221 @@ def generate_comparison_report(output_dir, project_root):
         print(f.read())
 
 
+def run_pipeline_version(args, project_root, epochs, fold_arg, use_enhanced, models):
+    """
+    Run complete pipeline for either base or enhanced models.
+
+    Args:
+        args: Command-line arguments
+        project_root: Project root path
+        epochs: Number of epochs
+        fold_arg: Fold argument list
+        use_enhanced: True for enhanced, False for base
+        models: List of models to train
+
+    Returns:
+        success_log: List of (model_name, success) tuples
+    """
+    success_log = []
+
+    # Determine which training script and labels to use
+    if use_enhanced:
+        train_script = 'training/advanced/train_enhanced_models.py'
+        model_suffix = ' Enhanced'
+        results_dir = 'enhanced'
+    else:
+        train_script = 'training/advanced/train_advanced_models.py'
+        model_suffix = ''
+        results_dir = 'advanced'
+
+    # Train selected models
+    if not args.skip_training:
+        # Step 1: Train BrainGT (if selected)
+        if 'braingt' in models:
+            cmd = [
+                sys.executable, train_script,
+                '--model', 'braingt',
+                '--epochs', str(epochs),
+                '--hidden_dim', '128',
+                '--n_heads', '8',
+                '--lr', '1e-4',
+                '--dropout', '0.2',
+                '--device', args.device,
+            ] + fold_arg
+
+            success = run_command(cmd, f"Training BrainGT{model_suffix} (Graph Transformer)", cwd=project_root)
+            success_log.append((f'BrainGT{model_suffix}', success))
+
+        # Step 2: Train BrainGNN (if selected)
+        if 'braingnn' in models:
+            cmd = [
+                sys.executable, train_script,
+                '--model', 'braingnn',
+                '--epochs', str(epochs),
+                '--hidden_dim', '128',
+                '--n_layers', '3',
+                '--dropout', '0.3',
+                '--device', args.device,
+            ] + fold_arg
+
+            success = run_command(cmd, f"Training BrainGNN{model_suffix} (ROI-Aware)", cwd=project_root)
+            success_log.append((f'BrainGNN{model_suffix}', success))
+
+        # Step 3: Train FBNetGen (if selected)
+        if 'fbnetgen' in models:
+            cmd = [
+                sys.executable, train_script,
+                '--model', 'fbnetgen',
+                '--epochs', str(epochs),
+                '--hidden_dim', '128',
+                '--n_layers', '3',
+                '--n_heads', '4',
+                '--dropout', '0.3',
+                '--device', args.device,
+            ] + fold_arg
+
+            success = run_command(cmd, f"Training FBNetGen{model_suffix} (Task-Aware)", cwd=project_root)
+            success_log.append((f'FBNetGen{model_suffix}', success))
+
+    # Step 4: Create Ensemble (skip in compare mode, will do separately)
+    if not args.skip_ensemble and not args.compare_base_enhanced:
+        if use_enhanced:
+            ensemble_script = 'training/advanced/train_ensemble.py'
+        else:
+            ensemble_script = 'training/advanced/train_ensemble.py'  # Same script
+
+        cmd = [
+            sys.executable, ensemble_script,
+            '--ensemble_type', 'weighted',
+            '--optimize_epochs', '100',
+            '--device', args.device,
+        ] + fold_arg
+
+        success = run_command(cmd, f"Creating Weighted Ensemble ({model_suffix.strip() or 'Base'})", cwd=project_root)
+        success_log.append((f'Ensemble{model_suffix}', success))
+
+    return success_log
+
+
+def generate_base_vs_enhanced_comparison(project_root, models, output_path):
+    """
+    Generate comparison report between base and enhanced models.
+
+    Args:
+        project_root: Project root path
+        models: List of models that were trained
+        output_path: Output directory path
+    """
+    print("\n" + "="*70)
+    print("GENERATING BASE vs ENHANCED COMPARISON REPORT")
+    print("="*70 + "\n")
+
+    comparison_data = []
+
+    for model_name in models:
+        model_upper = model_name.upper()
+
+        # Load base results
+        base_file = project_root / f'results/advanced/{model_name}/{model_name}_aggregate_summary.json'
+        # Load enhanced results
+        enhanced_file = project_root / f'results/enhanced/{model_name}_enhanced/{model_name}_aggregate_summary.json'
+
+        base_metrics = {}
+        enhanced_metrics = {}
+
+        if base_file.exists():
+            with open(base_file) as f:
+                base_summary = json.load(f)
+                base_metrics = base_summary.get('subject_level', {})
+
+        if enhanced_file.exists():
+            with open(enhanced_file) as f:
+                enhanced_summary = json.load(f)
+                enhanced_metrics = enhanced_summary.get('subject_level', {})
+
+        if base_metrics or enhanced_metrics:
+            comparison_data.append({
+                'model': model_upper,
+                'base_r': base_metrics.get('r', 0),
+                'enhanced_r': enhanced_metrics.get('r', 0),
+                'base_mse': base_metrics.get('mse', float('inf')),
+                'enhanced_mse': enhanced_metrics.get('mse', float('inf')),
+                'improvement_r': enhanced_metrics.get('r', 0) - base_metrics.get('r', 0),
+                'improvement_mse': base_metrics.get('mse', float('inf')) - enhanced_metrics.get('mse', float('inf')),
+            })
+
+    # Save comparison report
+    report_path = output_path / 'base_vs_enhanced_comparison.txt'
+
+    with open(report_path, 'w', encoding='utf-8') as f:
+        f.write("="*70 + "\n")
+        f.write("BASE vs ENHANCED MODELS COMPARISON\n")
+        f.write("="*70 + "\n\n")
+
+        f.write("Performance Comparison (Subject-Level Metrics):\n")
+        f.write("-"*70 + "\n")
+        f.write(f"{'Model':<15} {'Base r':<12} {'Enhanced r':<12} {'Improvement':<12}\n")
+        f.write("-"*70 + "\n")
+
+        for data in comparison_data:
+            f.write(f"{data['model']:<15} "
+                   f"{data['base_r']:<12.4f} "
+                   f"{data['enhanced_r']:<12.4f} "
+                   f"{data['improvement_r']:+.4f}\n")
+
+        f.write("\n" + "="*70 + "\n")
+        f.write("\nMSE Comparison (Lower is Better):\n")
+        f.write("-"*70 + "\n")
+        f.write(f"{'Model':<15} {'Base MSE':<12} {'Enhanced MSE':<12} {'Reduction':<12}\n")
+        f.write("-"*70 + "\n")
+
+        for data in comparison_data:
+            f.write(f"{data['model']:<15} "
+                   f"{data['base_mse']:<12.4f} "
+                   f"{data['enhanced_mse']:<12.4f} "
+                   f"{data['improvement_mse']:+.4f}\n")
+
+        f.write("\n" + "="*70 + "\n")
+        f.write("\nSummary:\n")
+        f.write("-"*70 + "\n")
+
+        avg_improvement_r = sum(d['improvement_r'] for d in comparison_data) / len(comparison_data) if comparison_data else 0
+        if avg_improvement_r > 0:
+            f.write(f"✓ Enhanced models show average improvement of {avg_improvement_r:.4f} in correlation\n")
+        else:
+            f.write(f"✗ Enhanced models show average decrease of {abs(avg_improvement_r):.4f} in correlation\n")
+
+        best_model = max(comparison_data, key=lambda x: x['enhanced_r']) if comparison_data else None
+        if best_model:
+            f.write(f"✓ Best enhanced model: {best_model['model']} (r={best_model['enhanced_r']:.4f})\n")
+
+    print(f"Comparison report saved to: {report_path}\n")
+
+    # Print to console
+    with open(report_path, encoding='utf-8') as f:
+        print(f.read())
+
+
+def print_comparison_summary(all_success_logs):
+    """
+    Print final summary for comparison mode.
+
+    Args:
+        all_success_logs: Dict with 'base' and 'enhanced' success logs
+    """
+    print("\n" + "="*70)
+    print("COMPARISON MODE COMPLETION SUMMARY")
+    print("="*70 + "\n")
+
+    for version, success_log in all_success_logs.items():
+        print(f"{version.upper()} Models:")
+        for model_name, success in success_log:
+            status = "✓ SUCCESS" if success else "✗ FAILED"
+            print(f"  {model_name:<30} {status}")
+
+    print("\n" + "="*70)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Run complete training pipeline")
 
@@ -172,6 +390,8 @@ def main():
                         help='Use enhanced models (default: True)')
     parser.add_argument('--use_base', dest='use_enhanced', action='store_false',
                         help='Use base models instead of enhanced')
+    parser.add_argument('--compare_base_enhanced', action='store_true',
+                        help='Run BOTH base and enhanced models, then compare results')
     parser.add_argument('--models', nargs='+',
                         choices=['braingt', 'braingnn', 'fbnetgen'],
                         default=['braingt', 'braingnn', 'fbnetgen'],
@@ -205,6 +425,41 @@ def main():
     # Create output directory (relative to project root)
     output_path = project_root / args.output_dir
     output_path.mkdir(parents=True, exist_ok=True)
+
+    # Handle compare_base_enhanced mode
+    if args.compare_base_enhanced:
+        print("\n" + "="*70)
+        print("COMPARE MODE: Running BOTH Base and Enhanced Models")
+        print("="*70)
+
+        all_success_logs = {}
+
+        # Run base models first
+        print("\n" + "="*70)
+        print("PHASE 1: Training BASE Models")
+        print("="*70)
+        success_log_base = run_pipeline_version(
+            args, project_root, epochs, fold_arg,
+            use_enhanced=False, models=args.models
+        )
+        all_success_logs['base'] = success_log_base
+
+        # Run enhanced models
+        print("\n" + "="*70)
+        print("PHASE 2: Training ENHANCED Models")
+        print("="*70)
+        success_log_enhanced = run_pipeline_version(
+            args, project_root, epochs, fold_arg,
+            use_enhanced=True, models=args.models
+        )
+        all_success_logs['enhanced'] = success_log_enhanced
+
+        # Generate comparison report
+        generate_base_vs_enhanced_comparison(project_root, args.models, output_path)
+
+        # Print final summary
+        print_comparison_summary(all_success_logs)
+        return
 
     success_log = []
 
