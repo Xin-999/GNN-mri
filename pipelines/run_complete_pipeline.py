@@ -253,7 +253,7 @@ def run_pipeline_version(args, project_root, epochs, fold_arg, use_enhanced, mod
     return success_log
 
 
-def generate_base_vs_enhanced_comparison(project_root, models, output_path):
+def generate_base_vs_enhanced_comparison(project_root, models, output_path, fold_name=None):
     """
     Generate comparison report between base and enhanced models.
 
@@ -261,6 +261,7 @@ def generate_base_vs_enhanced_comparison(project_root, models, output_path):
         project_root: Project root path
         models: List of models that were trained
         output_path: Output directory path
+        fold_name: Specific fold name for quick test mode
     """
     print("\n" + "="*70)
     print("GENERATING BASE vs ENHANCED COMPARISON REPORT")
@@ -271,23 +272,41 @@ def generate_base_vs_enhanced_comparison(project_root, models, output_path):
     for model_name in models:
         model_upper = model_name.upper()
 
-        # Load base results
-        base_file = project_root / f'results/advanced/{model_name}/{model_name}_aggregate_summary.json'
-        # Load enhanced results
+        # Load base results (per-fold for quick test)
+        if fold_name:
+            base_file = project_root / f'results/advanced/{model_name}/{fold_name}/{model_name}_summary.json'
+        else:
+            base_file = project_root / f'results/advanced/{model_name}/{model_name}_aggregate_summary.json'
+
+        # Load enhanced results (aggregate)
         enhanced_file = project_root / f'results/enhanced/{model_name}_enhanced/{model_name}_aggregate_summary.json'
 
         base_metrics = {}
         enhanced_metrics = {}
 
+        print(f"Looking for base results: {base_file}")
+        print(f"Looking for enhanced results: {enhanced_file}")
+
         if base_file.exists():
             with open(base_file) as f:
                 base_summary = json.load(f)
-                base_metrics = base_summary.get('subject_level', {})
+                # For per-fold base results
+                if 'subject_metrics' in base_summary:
+                    base_metrics = base_summary['subject_metrics']
+                # For aggregate base results
+                elif 'subject_level' in base_summary:
+                    base_metrics = base_summary['subject_level']
+            print(f"  Base metrics found: r={base_metrics.get('r', 'N/A')}")
+        else:
+            print(f"  Base file not found!")
 
         if enhanced_file.exists():
             with open(enhanced_file) as f:
                 enhanced_summary = json.load(f)
                 enhanced_metrics = enhanced_summary.get('subject_level', {})
+            print(f"  Enhanced metrics found: r={enhanced_metrics.get('r', 'N/A')}")
+        else:
+            print(f"  Enhanced file not found!")
 
         if base_metrics or enhanced_metrics:
             comparison_data.append({
@@ -455,7 +474,8 @@ def main():
         all_success_logs['enhanced'] = success_log_enhanced
 
         # Generate comparison report
-        generate_base_vs_enhanced_comparison(project_root, args.models, output_path)
+        fold_name = 'graphs_outer1_inner2' if args.quick_test else None
+        generate_base_vs_enhanced_comparison(project_root, args.models, output_path, fold_name=fold_name)
 
         # Print final summary
         print_comparison_summary(all_success_logs)
