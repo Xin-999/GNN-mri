@@ -274,9 +274,17 @@ def generate_base_vs_enhanced_comparison(project_root, models, output_path, fold
 
         # Load base results (per-fold for quick test)
         if fold_name:
-            base_file = project_root / f'results/advanced/{model_name}/{fold_name}/{model_name}_summary.json'
+            # Try multiple possible paths
+            base_paths = [
+                project_root / f'results/advanced/{model_name}/{fold_name}/{model_name}_summary.json',
+                project_root / f'results/advanced/{model_name}/{fold_name}.pkl/{model_name}_summary.json',
+                Path(f'results/advanced/{model_name}/{fold_name}/{model_name}_summary.json'),
+                Path(f'../../results/advanced/{model_name}/{fold_name}/{model_name}_summary.json'),
+            ]
         else:
-            base_file = project_root / f'results/advanced/{model_name}/{model_name}_aggregate_summary.json'
+            base_paths = [
+                project_root / f'results/advanced/{model_name}/{model_name}_aggregate_summary.json',
+            ]
 
         # Load enhanced results (aggregate)
         enhanced_file = project_root / f'results/enhanced/{model_name}_enhanced/{model_name}_aggregate_summary.json'
@@ -284,10 +292,16 @@ def generate_base_vs_enhanced_comparison(project_root, models, output_path, fold
         base_metrics = {}
         enhanced_metrics = {}
 
-        print(f"Looking for base results: {base_file}")
-        print(f"Looking for enhanced results: {enhanced_file}")
+        # Try to find base file
+        base_file = None
+        for path in base_paths:
+            print(f"Checking base path: {path}")
+            if path.exists():
+                base_file = path
+                print(f"  ✓ Found!")
+                break
 
-        if base_file.exists():
+        if base_file:
             with open(base_file) as f:
                 base_summary = json.load(f)
                 # For per-fold base results
@@ -296,27 +310,40 @@ def generate_base_vs_enhanced_comparison(project_root, models, output_path, fold
                 # For aggregate base results
                 elif 'subject_level' in base_summary:
                     base_metrics = base_summary['subject_level']
-            print(f"  Base metrics found: r={base_metrics.get('r', 'N/A')}")
+            print(f"  Base metrics: r={base_metrics.get('r', 'N/A')}, mse={base_metrics.get('mse', 'N/A')}")
         else:
-            print(f"  Base file not found!")
+            print(f"  ✗ Base file not found in any location!")
 
         if enhanced_file.exists():
             with open(enhanced_file) as f:
                 enhanced_summary = json.load(f)
-                enhanced_metrics = enhanced_summary.get('subject_level', {})
+                # Enhanced models use subject_level_aggregate with mean/std structure
+                subject_agg = enhanced_summary.get('subject_level_aggregate', {})
+                if subject_agg:
+                    enhanced_metrics = {
+                        'r': subject_agg.get('r', {}).get('mean', 0),
+                        'mse': subject_agg.get('mse', {}).get('mean', float('inf')),
+                    }
+                else:
+                    enhanced_metrics = {}
             print(f"  Enhanced metrics found: r={enhanced_metrics.get('r', 'N/A')}")
         else:
             print(f"  Enhanced file not found!")
 
         if base_metrics or enhanced_metrics:
+            base_r = base_metrics.get('r', 0) if base_metrics else 0
+            base_mse = base_metrics.get('mse', float('inf')) if base_metrics else float('inf')
+            enhanced_r = enhanced_metrics.get('r', 0) if enhanced_metrics else 0
+            enhanced_mse = enhanced_metrics.get('mse', float('inf')) if enhanced_metrics else float('inf')
+
             comparison_data.append({
                 'model': model_upper,
-                'base_r': base_metrics.get('r', 0),
-                'enhanced_r': enhanced_metrics.get('r', 0),
-                'base_mse': base_metrics.get('mse', float('inf')),
-                'enhanced_mse': enhanced_metrics.get('mse', float('inf')),
-                'improvement_r': enhanced_metrics.get('r', 0) - base_metrics.get('r', 0),
-                'improvement_mse': base_metrics.get('mse', float('inf')) - enhanced_metrics.get('mse', float('inf')),
+                'base_r': base_r,
+                'enhanced_r': enhanced_r,
+                'base_mse': base_mse,
+                'enhanced_mse': enhanced_mse,
+                'improvement_r': enhanced_r - base_r,
+                'improvement_mse': base_mse - enhanced_mse,
             })
 
     # Save comparison report
