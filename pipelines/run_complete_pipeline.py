@@ -304,12 +304,27 @@ def generate_base_vs_enhanced_comparison(project_root, models, output_path, fold
         if base_file:
             with open(base_file) as f:
                 base_summary = json.load(f)
-                # For per-fold base results
+                print(f"  Base JSON keys: {list(base_summary.keys())}")
+
+                # For per-fold base results - try different key structures
                 if 'subject_metrics' in base_summary:
                     base_metrics = base_summary['subject_metrics']
-                # For aggregate base results
+                    print(f"    Using 'subject_metrics'")
                 elif 'subject_level' in base_summary:
                     base_metrics = base_summary['subject_level']
+                    print(f"    Using 'subject_level'")
+                elif 'test_metrics' in base_summary and isinstance(base_summary['test_metrics'], dict):
+                    if 'subject_level' in base_summary['test_metrics']:
+                        base_metrics = base_summary['test_metrics']['subject_level']
+                        print(f"    Using 'test_metrics' -> 'subject_level'")
+                else:
+                    # Try to find any dict with 'r' and 'mse' keys
+                    for key, value in base_summary.items():
+                        if isinstance(value, dict) and 'r' in value and 'mse' in value:
+                            base_metrics = value
+                            print(f"    Found metrics in '{key}'")
+                            break
+
             print(f"  Base metrics: r={base_metrics.get('r', 'N/A')}, mse={base_metrics.get('mse', 'N/A')}")
         else:
             print(f"  ✗ Base file not found in any location!")
