@@ -6,7 +6,7 @@ Automated hyperparameter optimization for brain GNN models.
 "Bayesian Optimization"
 Usage:
     # Search for BrainGT
-    python hyperparameter_search.py --model braingt --n_trials 50
+    python hyperparameter_search.py --model fbnetgen --n_trials 50
 
     # Search for BrainGNN
     python hyperparameter_search.py --model braingnn --n_trials 30
@@ -24,7 +24,12 @@ Searches over:
 
 import argparse
 import json
+import sys
 from pathlib import Path
+
+# Add project root to path so we can import modules
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
 
 import numpy as np
 import torch
@@ -41,6 +46,10 @@ from models.brain_gt import BrainGT
 from models.brain_gnn import SimpleBrainGNN
 from models.fbnetgen import FBNetGenFromGraph
 
+from models_enhanced.brain_gt_enhanced import BrainGTEnhanced
+from models_enhanced.brain_gnn_enhanced import BrainGNNEnhanced
+from models_enhanced.fbnetgen_enhanced import FBNetGenFromGraphEnhanced
+
 from utils.data_utils import (
     load_graphs_with_normalization,
     create_dataloaders,
@@ -48,7 +57,7 @@ from utils.data_utils import (
 )
 
 
-def objective(trial, model_name, fold_path, device, n_epochs=30):
+def objective(trial, model_name, fold_path, device, n_epochs=30, use_enhanced=False):
     """
     Objective function for Optuna optimization.
 
@@ -58,9 +67,10 @@ def objective(trial, model_name, fold_path, device, n_epochs=30):
         fold_path: Path to fold data
         device: 'cuda' or 'cpu'
         n_epochs: Number of epochs to train
+        use_enhanced: Use enhanced models (default: False)
 
     Returns:
-        validation_metric: Metric to minimize (validation MSE)
+        validation_metric: Pearson correlation (r) to maximize
     """
     # Set seed for this trial (based on trial number for reproducibility)
     import random
@@ -75,9 +85,9 @@ def objective(trial, model_name, fold_path, device, n_epochs=30):
 
     # Suggest hyperparameters
     hidden_dim = trial.suggest_categorical('hidden_dim', [64, 128, 256, 512])
-    lr = trial.suggest_loguniform('lr', 1e-5, 1e-2)
-    weight_decay = trial.suggest_loguniform('weight_decay', 1e-6, 1e-2)
-    dropout = trial.suggest_uniform('dropout', 0.1, 0.5)
+    lr = trial.suggest_float('lr', 1e-5, 1e-2, log=True)
+    weight_decay = trial.suggest_float('weight_decay', 1e-6, 1e-2, log=True)
+    dropout = trial.suggest_float('dropout', 0.1, 0.5)
     batch_size = trial.suggest_categorical('batch_size', [16, 32, 64])
     n_layers = trial.suggest_int('n_layers', 2, 5)
 
@@ -109,37 +119,69 @@ def objective(trial, model_name, fold_path, device, n_epochs=30):
     # Initialize model
     in_dim = train_graphs[0].x.size(-1)
 
-    if model_name == 'braingt':
-        model = BrainGT(
-            in_dim=in_dim,
-            hidden_dim=hidden_dim,
-            n_rois=268,
-            n_transformer_layers=n_transformer_layers,
-            n_gnn_layers=n_gnn_layers,
-            n_heads=n_heads,
-            dropout=dropout,
-            pool_type=pool_type,
-        )
-    elif model_name == 'braingnn':
-        model = SimpleBrainGNN(
-            in_dim=in_dim,
-            hidden_dim=hidden_dim,
-            n_rois=268,
-            n_communities=n_communities,
-            n_layers=n_layers,
-            dropout=dropout,
-        )
-    elif model_name == 'fbnetgen':
-        model = FBNetGenFromGraph(
-            in_dim=in_dim,
-            hidden_dim=hidden_dim,
-            n_layers=n_layers,
-            n_heads=n_heads,
-            dropout=dropout,
-            refine_graph=refine_graph,
-        )
+    if use_enhanced:
+        # Enhanced models
+        if model_name == 'braingt':
+            model = BrainGTEnhanced(
+                in_dim=in_dim,
+                hidden_dim=hidden_dim,
+                n_rois=268,
+                n_transformer_layers=n_transformer_layers,
+                n_gnn_layers=n_gnn_layers,
+                n_heads=n_heads,
+                dropout=dropout,
+            )
+        elif model_name == 'braingnn':
+            model = BrainGNNEnhanced(
+                in_dim=in_dim,
+                hidden_dim=hidden_dim,
+                n_rois=268,
+                n_layers=n_layers,
+                dropout=dropout,
+            )
+        elif model_name == 'fbnetgen':
+            model = FBNetGenFromGraphEnhanced(
+                in_dim=in_dim,
+                hidden_dim=hidden_dim,
+                n_layers=n_layers,
+                n_heads=n_heads,
+                dropout=dropout,
+            )
+        else:
+            raise ValueError(f"Unknown model: {model_name}")
     else:
-        raise ValueError(f"Unknown model: {model_name}")
+        # Base models
+        if model_name == 'braingt':
+            model = BrainGT(
+                in_dim=in_dim,
+                hidden_dim=hidden_dim,
+                n_rois=268,
+                n_transformer_layers=n_transformer_layers,
+                n_gnn_layers=n_gnn_layers,
+                n_heads=n_heads,
+                dropout=dropout,
+                pool_type=pool_type,
+            )
+        elif model_name == 'braingnn':
+            model = SimpleBrainGNN(
+                in_dim=in_dim,
+                hidden_dim=hidden_dim,
+                n_rois=268,
+                n_communities=n_communities,
+                n_layers=n_layers,
+                dropout=dropout,
+            )
+        elif model_name == 'fbnetgen':
+            model = FBNetGenFromGraph(
+                in_dim=in_dim,
+                hidden_dim=hidden_dim,
+                n_layers=n_layers,
+                n_heads=n_heads,
+                dropout=dropout,
+                refine_graph=refine_graph,
+            )
+        else:
+            raise ValueError(f"Unknown model: {model_name}")
 
     model = model.to(device)
 
@@ -148,7 +190,8 @@ def objective(trial, model_name, fold_path, device, n_epochs=30):
     criterion = nn.MSELoss()
 
     # Training loop
-    best_val_mse = float('inf')
+    best_val_r = -float('inf')
+    best_val_metrics = {}
     patience_counter = 0
     patience = 5
 
@@ -180,11 +223,12 @@ def objective(trial, model_name, fold_path, device, n_epochs=30):
         targets = torch.cat(all_targets).numpy()
 
         val_metrics = compute_metrics(predictions, targets, prefix='')
-        val_mse = val_metrics['mse']
+        val_r = val_metrics['r']
 
-        # Early stopping
-        if val_mse < best_val_mse - 1e-5:
-            best_val_mse = val_mse
+        # Early stopping (maximize correlation)
+        if val_r > best_val_r + 1e-5:
+            best_val_r = val_r
+            best_val_metrics = val_metrics  # Save all metrics for best epoch
             patience_counter = 0
         else:
             patience_counter += 1
@@ -192,14 +236,21 @@ def objective(trial, model_name, fold_path, device, n_epochs=30):
         if patience_counter >= patience:
             break
 
-        # Report intermediate value for pruning
-        trial.report(val_mse, epoch)
+        # Report intermediate value for pruning (use negative r for minimization-based pruner)
+        trial.report(-val_r, epoch)
 
         # Handle pruning
         if trial.should_prune():
             raise optuna.TrialPruned()
 
-    return best_val_mse
+    # Store all metrics as user attributes
+    trial.set_user_attr('best_val_r', best_val_r)
+    trial.set_user_attr('best_val_mse', best_val_metrics.get('mse', float('nan')))
+    trial.set_user_attr('best_val_mae', best_val_metrics.get('mae', float('nan')))
+    trial.set_user_attr('best_val_r2', best_val_metrics.get('r2', float('nan')))
+    trial.set_user_attr('best_val_p_value', best_val_metrics.get('p_value', float('nan')))
+
+    return best_val_r
 
 
 def main():
@@ -209,6 +260,8 @@ def main():
     parser.add_argument('--model', type=str, required=True,
                         choices=['braingt', 'braingnn', 'fbnetgen'],
                         help='Model architecture')
+    parser.add_argument('--use_enhanced', action='store_true',
+                        help='Use enhanced models instead of base models')
 
     # Search configuration
     parser.add_argument('--n_trials', type=int, default=50,
@@ -260,18 +313,20 @@ def main():
 
     study = optuna.create_study(
         study_name=study_name,
-        direction='minimize',
+        direction='maximize',
         pruner=optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=10),
         sampler=optuna.samplers.TPESampler(seed=42),
     )
 
-    print(f"Starting hyperparameter search for {args.model}")
+    model_type = "Enhanced" if args.use_enhanced else "Base"
+    print(f"Starting hyperparameter search for {args.model.upper()} ({model_type})")
     print(f"Number of trials: {args.n_trials}")
-    print(f"Epochs per trial: {args.n_epochs}\n")
+    print(f"Epochs per trial: {args.n_epochs}")
+    print(f"Optimizing for: Pearson correlation (r)\n")
 
     # Run optimization
     study.optimize(
-        lambda trial: objective(trial, args.model, str(fold_path), args.device, args.n_epochs),
+        lambda trial: objective(trial, args.model, str(fold_path), args.device, args.n_epochs, args.use_enhanced),
         n_trials=args.n_trials,
         n_jobs=args.n_jobs,
         show_progress_bar=True,
@@ -282,30 +337,55 @@ def main():
     print("Search Results")
     print(f"{'='*60}\n")
 
-    print(f"Best trial value (validation MSE): {study.best_trial.value:.4f}")
+    # Get best trial metrics
+    best_trial = study.best_trial
+    print(f"Best trial #{best_trial.number}")
+    print(f"\nValidation Metrics:")
+    print(f"  Pearson r:  {best_trial.user_attrs.get('best_val_r', best_trial.value):.4f}")
+    print(f"  MSE:        {best_trial.user_attrs.get('best_val_mse', float('nan')):.4f}")
+    print(f"  MAE:        {best_trial.user_attrs.get('best_val_mae', float('nan')):.4f}")
+    print(f"  R²:         {best_trial.user_attrs.get('best_val_r2', float('nan')):.4f}")
+    print(f"  p-value:    {best_trial.user_attrs.get('best_val_p_value', float('nan')):.4e}")
+
     print("\nBest hyperparameters:")
-    for key, value in study.best_trial.params.items():
+    for key, value in best_trial.params.items():
         print(f"  {key}: {value}")
 
     # Save results
     results = {
         'model': args.model,
+        'model_type': 'enhanced' if args.use_enhanced else 'base',
         'fold': fold_path.name,
         'n_trials': args.n_trials,
-        'best_value': study.best_trial.value,
-        'best_params': study.best_trial.params,
+        'best_value': best_trial.value,
+        'best_metrics': {
+            'r': best_trial.user_attrs.get('best_val_r', best_trial.value),
+            'mse': best_trial.user_attrs.get('best_val_mse', float('nan')),
+            'mae': best_trial.user_attrs.get('best_val_mae', float('nan')),
+            'r2': best_trial.user_attrs.get('best_val_r2', float('nan')),
+            'p_value': best_trial.user_attrs.get('best_val_p_value', float('nan')),
+        },
+        'best_params': best_trial.params,
         'all_trials': [
             {
                 'number': trial.number,
                 'value': trial.value,
                 'params': trial.params,
                 'state': str(trial.state),
+                'metrics': {
+                    'r': trial.user_attrs.get('best_val_r', trial.value),
+                    'mse': trial.user_attrs.get('best_val_mse', float('nan')),
+                    'mae': trial.user_attrs.get('best_val_mae', float('nan')),
+                    'r2': trial.user_attrs.get('best_val_r2', float('nan')),
+                    'p_value': trial.user_attrs.get('best_val_p_value', float('nan')),
+                }
             }
             for trial in study.trials
         ],
     }
 
-    results_path = output_dir / f"{args.model}_search_results.json"
+    model_suffix = '_enhanced' if args.use_enhanced else '_base'
+    results_path = output_dir / f"{args.model}{model_suffix}_search_results.json"
     with open(results_path, 'w') as f:
         json.dump(results, f, indent=2)
 

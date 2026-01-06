@@ -13,7 +13,10 @@ results_gatv2_predictions_grid2
 results_gatv2_grid
 /.claude
 
+hyperparameter_search_results/fbnetgen_search_results.json
+
 # Python cache directories
+models\__pycache__
 **/__pycache__/
 models/__pycache__/
 utils/__pycache__/
