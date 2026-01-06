@@ -195,8 +195,15 @@ def train_model(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Set seed for reproducibility
+    import random
+    random.seed(config['seed'])
     torch.manual_seed(config['seed'])
     np.random.seed(config['seed'])
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(config['seed'])
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+    print(f"Random seed set to: {config['seed']}")
 
     # Load data with normalization
     print(f"\n{'='*60}")

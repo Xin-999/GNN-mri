@@ -588,6 +588,8 @@ def main():
     parser.add_argument('--device', type=str, default='cuda',
                         choices=['cuda', 'cpu'])
     parser.add_argument('--num_workers', type=int, default=0)
+    parser.add_argument('--seed', type=int, default=42,
+                        help='Random seed for reproducibility')
 
     args = parser.parse_args()
 
@@ -600,8 +602,20 @@ def main():
 
     print(f"Using device: {device}")
 
+    # Set seed for reproducibility
+    import random
+    random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    np.random.seed(args.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(args.seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+    print(f"Random seed set to: {args.seed}")
+
     # Configuration
     config = {
+        'seed': args.seed,
         'epochs': args.epochs,
         'batch_size': args.batch_size,
         'lr': args.lr,

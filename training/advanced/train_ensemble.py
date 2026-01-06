@@ -76,6 +76,8 @@ def main():
                         help='Output directory')
     parser.add_argument('--device', type=str, default='cuda',
                         choices=['cuda', 'cpu'])
+    parser.add_argument('--seed', type=int, default=42,
+                        help='Random seed for reproducibility')
 
     args = parser.parse_args()
 
@@ -83,6 +85,17 @@ def main():
     if args.device == 'cuda' and not torch.cuda.is_available():
         print("CUDA not available, using CPU")
         args.device = 'cpu'
+
+    # Set seed for reproducibility
+    import random
+    random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    np.random.seed(args.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(args.seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+    print(f"Random seed set to: {args.seed}")
 
     # Get fold files
     fold_dir = Path(args.fold_dir)

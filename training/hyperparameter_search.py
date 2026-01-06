@@ -62,6 +62,17 @@ def objective(trial, model_name, fold_path, device, n_epochs=30):
     Returns:
         validation_metric: Metric to minimize (validation MSE)
     """
+    # Set seed for this trial (based on trial number for reproducibility)
+    import random
+    trial_seed = 42 + trial.number
+    random.seed(trial_seed)
+    torch.manual_seed(trial_seed)
+    np.random.seed(trial_seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(trial_seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+
     # Suggest hyperparameters
     hidden_dim = trial.suggest_categorical('hidden_dim', [64, 128, 256, 512])
     lr = trial.suggest_loguniform('lr', 1e-5, 1e-2)
