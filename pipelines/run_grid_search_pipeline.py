@@ -338,11 +338,11 @@ def main():
     if args.quick_test:
         args.epochs = 2
         args.hidden_dims = [64, 128]
-        args.dropouts = [0.2, 0.3]
+        args.dropouts = [0.2]
         args.learning_rates = [1e-4]
         args.n_layers = [2, 3]
-        args.n_heads_braingt = [4, 8]
-        args.n_heads_fbnetgen = [2, 4]
+        args.n_heads_braingt = [4]
+        args.n_heads_fbnetgen = [2]
         fold_name = 'graphs_outer1_inner2'
     else:
         fold_name = None
