@@ -6,10 +6,10 @@ Automated hyperparameter optimization for brain GNN models.
 "Bayesian Optimization"
 Usage:
     # Search for BrainGT
-    python hyperparameter_search.py --model fbnetgen --n_trials 50
+    python training/hyperparameter_search.py --model fbnetgen --n_trials 50
 
     # Search for BrainGNN
-    python hyperparameter_search.py --model braingnn --n_trials 30
+    python training/hyperparameter_search.py --model braingnn --n_trials 30
 
     python training/hyperparameter_search.py --model braingnn --n_trials 50 --device cuda ; python training/hyperparameter_search.py --model fbnetgen --n_trials 50 --device cuda
 
