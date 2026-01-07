@@ -196,28 +196,39 @@ def objective(trial, model_name, fold_path, device, n_epochs=30, use_enhanced=Fa
     patience = 5
 
     for epoch in range(n_epochs):
-        # Train
-        model.train()
-        for batch in train_loader:
-            batch = batch.to(device)
-            optimizer.zero_grad()
-            preds = model(batch)
-            loss = criterion(preds, batch.y.float())
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-            optimizer.step()
-
-        # Validate
-        model.eval()
-        all_preds = []
-        all_targets = []
-
-        with torch.no_grad():
-            for batch in val_loader:
+        try:
+            # Train
+            model.train()
+            for batch in train_loader:
                 batch = batch.to(device)
+                optimizer.zero_grad()
                 preds = model(batch)
-                all_preds.append(preds.cpu())
-                all_targets.append(batch.y.cpu())
+                loss = criterion(preds, batch.y.float())
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                optimizer.step()
+
+            # Validate
+            model.eval()
+            all_preds = []
+            all_targets = []
+
+            with torch.no_grad():
+                for batch in val_loader:
+                    batch = batch.to(device)
+                    preds = model(batch)
+                    all_preds.append(preds.cpu())
+                    all_targets.append(batch.y.cpu())
+        except RuntimeError as e:
+            # Handle CUDA out of memory
+            if "out of memory" in str(e).lower():
+                print(f"\n⚠️  Trial {trial.number} failed: CUDA Out of Memory")
+                print(f"   Config: hidden_dim={hidden_dim}, batch_size={batch_size}, n_layers={n_layers}")
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                raise optuna.TrialPruned()
+            else:
+                raise
 
         predictions = torch.cat(all_preds).numpy()
         targets = torch.cat(all_targets).numpy()
