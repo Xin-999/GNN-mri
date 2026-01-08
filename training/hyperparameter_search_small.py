@@ -388,10 +388,13 @@ def main():
     except ImportError:
         print("Plotly not installed - skipping visualizations")
 
-    print("\n Top 5 trials:")
+    print("\nTop 5 trials (by Pearson r):")
     print("="*60)
-    trials_df = study.trials_dataframe().sort_values('value').head(5)
-    print(trials_df[['number', 'value', 'params_hidden_dim', 'params_lr', 'params_dropout']])
+    trials_df = study.trials_dataframe().sort_values('value', ascending=False).head(5)
+    display_df = trials_df[['number', 'value', 'params_hidden_dim', 'params_lr', 'params_dropout']].rename(
+        columns={'value': 'pearson_r'}
+    )
+    print(display_df)
 
 
 if __name__ == "__main__":
