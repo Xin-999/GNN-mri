@@ -46,6 +46,7 @@ from utils.data_utils import (
     compute_metrics,
     aggregate_window_predictions,
     save_predictions,
+    permutation_test,
 )
 
 
@@ -328,13 +329,35 @@ def train_model(
     print("Window-level metrics:")
     print(f"  MSE: {test_metrics['win_mse']:.4f}")
     print(f"  MAE: {test_metrics['win_mae']:.4f}")
-    print(f"  r:   {test_metrics['win_r']:.4f} (p={test_metrics['win_p_value']:.2e})")
+    print(f"  Pearson r:  {test_metrics['win_pearson_r']:.4f} (p={test_metrics['win_pearson_p']:.2e})")
+    print(f"  Spearman r: {test_metrics['win_spearman_r']:.4f} (p={test_metrics['win_spearman_p']:.2e})")
 
     if 'subj_mse' in test_metrics:
         print("\nSubject-level metrics:")
         print(f"  MSE: {test_metrics['subj_mse']:.4f}")
         print(f"  MAE: {test_metrics['subj_mae']:.4f}")
-        print(f"  r:   {test_metrics['subj_r']:.4f} (p={test_metrics['subj_p_value']:.2e})")
+        print(f"  Pearson r:  {test_metrics['subj_pearson_r']:.4f} (p={test_metrics['subj_pearson_p']:.2e})")
+        print(f"  Spearman r: {test_metrics['subj_spearman_r']:.4f} (p={test_metrics['subj_spearman_p']:.2e})")
+
+    # Permutation testing for significance
+    perm_results = {}
+    if 'subj_mse' in test_metrics:
+        print(f"\nRunning permutation tests (1000 permutations)...")
+
+        # Get subject-level predictions
+        subj_preds, _ = aggregate_window_predictions(test_preds, info['test_subject_ids'])
+        subj_targets, _ = aggregate_window_predictions(test_targets, info['test_subject_ids'])
+
+        # Pearson permutation test
+        perm_pearson = permutation_test(subj_preds, subj_targets, n_permutations=1000, metric='pearson')
+        perm_results['subject_pearson'] = perm_pearson
+
+        # Spearman permutation test
+        perm_spearman = permutation_test(subj_preds, subj_targets, n_permutations=1000, metric='spearman')
+        perm_results['subject_spearman'] = perm_spearman
+
+        print(f"  Subject Pearson r: {perm_pearson['pearson_r']:.4f}, perm p-value: {perm_pearson['pearson_perm_p']:.4f}")
+        print(f"  Subject Spearman r: {perm_spearman['spearman_r']:.4f}, perm p-value: {perm_spearman['spearman_perm_p']:.4f}")
 
     # Save comprehensive results with tracking info
     import datetime
@@ -375,17 +398,28 @@ def train_model(
             'window_level': {
                 'mse': test_metrics.get('win_mse'),
                 'mae': test_metrics.get('win_mae'),
+                'pearson_r': test_metrics.get('win_pearson_r'),
+                'pearson_p': test_metrics.get('win_pearson_p'),
+                'spearman_r': test_metrics.get('win_spearman_r'),
+                'spearman_p': test_metrics.get('win_spearman_p'),
+                'r2': test_metrics.get('win_r2'),
+                # Keep 'r' for backward compatibility
                 'r': test_metrics.get('win_r'),
                 'p_value': test_metrics.get('win_p_value'),
-                'r2': test_metrics.get('win_r2'),
             },
             'subject_level': {
                 'mse': test_metrics.get('subj_mse'),
                 'mae': test_metrics.get('subj_mae'),
+                'pearson_r': test_metrics.get('subj_pearson_r'),
+                'pearson_p': test_metrics.get('subj_pearson_p'),
+                'spearman_r': test_metrics.get('subj_spearman_r'),
+                'spearman_p': test_metrics.get('subj_spearman_p'),
+                'r2': test_metrics.get('subj_r2'),
+                # Keep 'r' for backward compatibility
                 'r': test_metrics.get('subj_r'),
                 'p_value': test_metrics.get('subj_p_value'),
-                'r2': test_metrics.get('subj_r2'),
             } if 'subj_mse' in test_metrics else None,
+            'permutation_tests': perm_results,
         },
 
         # Data Statistics
@@ -481,9 +515,10 @@ def main():
         print("CUDA not available, using CPU")
         args.device = 'cpu'
 
-    # Output directory
+    # Output directory (use absolute path from project root)
     if args.output_dir is None:
-        args.output_dir = f"../../results/advanced/{args.model}"
+        project_root = Path(__file__).parent.parent.parent
+        args.output_dir = str(project_root / "results" / "advanced" / args.model)
 
     # Configuration
     config = {

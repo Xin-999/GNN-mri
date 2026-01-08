@@ -109,20 +109,34 @@ def run_training(model_name, config, fold_name, device, project_root):
         success = result.returncode == 0
 
         if success:
-            # Move results to grid search folder with config name
+            # Save only metrics (no predictions or model checkpoints)
+            import shutil
+
             results_base = project_root / 'results' / 'enhanced' / f'{model_name}_enhanced'
             grid_base = project_root / 'results' / 'grid_search' / model_name / config_str
             grid_base.mkdir(parents=True, exist_ok=True)
 
-            # Copy aggregate summary
+            # Copy aggregate summary (main metrics file)
             aggregate_file = results_base / f'{model_name}_aggregate_summary.json'
             if aggregate_file.exists():
-                import shutil
                 shutil.copy(aggregate_file, grid_base / 'aggregate_summary.json')
 
-                # Save config info
-                with open(grid_base / 'config.json', 'w') as f:
-                    json.dump(config, f, indent=2)
+            # Copy only the summary JSON files from each fold (no predictions/models)
+            if results_base.exists():
+                for fold_dir in results_base.iterdir():
+                    if fold_dir.is_dir() and fold_dir.name.startswith('graphs_'):
+                        # Find summary JSON in fold directory
+                        summary_file = fold_dir / f'{model_name}_summary.json'
+                        if summary_file.exists():
+                            # Create fold subdirectory
+                            fold_dest = grid_base / fold_dir.name
+                            fold_dest.mkdir(parents=True, exist_ok=True)
+                            # Copy only summary file
+                            shutil.copy(summary_file, fold_dest / f'{model_name}_summary.json')
+
+            # Save config info
+            with open(grid_base / 'config.json', 'w') as f:
+                json.dump(config, f, indent=2)
 
             print(f"\n✓ Training {model_name.upper()} with {config_str} completed successfully")
         else:

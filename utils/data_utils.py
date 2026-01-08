@@ -340,27 +340,103 @@ def compute_metrics(
     Returns:
         metrics: Dictionary of metric name -> value
     """
-    from scipy.stats import pearsonr
+    from scipy.stats import pearsonr, spearmanr
     from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 
     if len(predictions) < 2:
         warnings.warn(f"Too few samples ({len(predictions)}) to compute meaningful metrics")
-        return {f'{prefix}mse': float('nan'), f'{prefix}r': float('nan')}
+        return {f'{prefix}mse': float('nan'), f'{prefix}pearson_r': float('nan'), f'{prefix}spearman_r': float('nan')}
 
     mse = mean_squared_error(targets, predictions)
     mae = mean_absolute_error(targets, predictions)
-    r, p_value = pearsonr(predictions, targets)
+
+    # Pearson correlation (linear)
+    pearson_r, pearson_p = pearsonr(predictions, targets)
+
+    # Spearman correlation (rank-based)
+    spearman_r, spearman_p = spearmanr(predictions, targets)
+
     r2 = r2_score(targets, predictions)
 
     metrics = {
         f'{prefix}mse': float(mse),
         f'{prefix}mae': float(mae),
-        f'{prefix}r': float(r),
-        f'{prefix}p_value': float(p_value),
+        f'{prefix}pearson_r': float(pearson_r),
+        f'{prefix}pearson_p': float(pearson_p),
+        f'{prefix}spearman_r': float(spearman_r),
+        f'{prefix}spearman_p': float(spearman_p),
         f'{prefix}r2': float(r2),
+        # Keep 'r' as alias for pearson_r for backward compatibility
+        f'{prefix}r': float(pearson_r),
+        f'{prefix}p_value': float(pearson_p),
     }
 
     return metrics
+
+
+def permutation_test(
+    predictions: np.ndarray,
+    targets: np.ndarray,
+    n_permutations: int = 1000,
+    metric: str = 'pearson',
+    random_state: int = 42
+) -> Dict[str, float]:
+    """
+    Permutation test for correlation significance.
+
+    Creates null distribution by shuffling labels (without retraining).
+
+    Args:
+        predictions: Model predictions (fixed)
+        targets: True labels (will be shuffled)
+        n_permutations: Number of random shuffles
+        metric: 'pearson' or 'spearman'
+        random_state: Random seed for reproducibility
+
+    Returns:
+        results: Dict with real_r, perm_p_value, null_distribution
+    """
+    from scipy.stats import pearsonr, spearmanr
+
+    np.random.seed(random_state)
+
+    # Compute real correlation
+    if metric == 'pearson':
+        real_r, _ = pearsonr(predictions, targets)
+    elif metric == 'spearman':
+        real_r, _ = spearmanr(predictions, targets)
+    else:
+        raise ValueError(f"Unknown metric: {metric}")
+
+    # Build null distribution by shuffling targets
+    null_r = []
+    for _ in range(n_permutations):
+        # Shuffle targets (break true relationship)
+        shuffled_targets = np.random.permutation(targets)
+
+        # Compute correlation with shuffled targets
+        if metric == 'pearson':
+            null_corr, _ = pearsonr(predictions, shuffled_targets)
+        else:
+            null_corr, _ = spearmanr(predictions, shuffled_targets)
+
+        null_r.append(null_corr)
+
+    null_r = np.array(null_r)
+
+    # Compute permutation p-value (two-tailed)
+    # How many null correlations are as extreme as real correlation?
+    p_value = np.mean(np.abs(null_r) >= np.abs(real_r))
+
+    results = {
+        f'{metric}_r': float(real_r),
+        f'{metric}_perm_p': float(p_value),
+        f'{metric}_null_mean': float(np.mean(null_r)),
+        f'{metric}_null_std': float(np.std(null_r)),
+        f'{metric}_null_distribution': null_r.tolist(),
+    }
+
+    return results
 
 
 def save_predictions(

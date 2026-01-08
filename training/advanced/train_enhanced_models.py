@@ -49,6 +49,7 @@ from utils.data_utils import (
     compute_metrics,
     aggregate_window_predictions,
     save_predictions,
+    permutation_test,
 )
 
 
@@ -332,11 +333,9 @@ def train_fold(model_name, fold_path, config, device):
             best_epoch = epoch
             patience_counter = 0
 
-            # Save best model
-            output_dir = Path(f"../../results/enhanced/{model_name}_enhanced") / fold_path.name
-            if not output_dir.parent.parent.exists():
-                # Fallback: try from project root
-                output_dir = Path(f"results/enhanced/{model_name}_enhanced") / fold_path.name
+            # Save best model (use absolute path from project root)
+            project_root = Path(__file__).parent.parent.parent
+            output_dir = project_root / "results" / "enhanced" / f"{model_name}_enhanced" / fold_path.name
             output_dir.mkdir(parents=True, exist_ok=True)
 
             torch.save({
@@ -365,10 +364,36 @@ def train_fold(model_name, fold_path, config, device):
 
     print(f"\nTest Results:")
     print(f"  Window-level MSE: {test_result['window_metrics']['mse']:.4f}")
-    print(f"  Window-level r: {test_result['window_metrics']['r']:.4f}")
+    print(f"  Window-level Pearson r: {test_result['window_metrics']['pearson_r']:.4f} (p={test_result['window_metrics']['pearson_p']:.2e})")
+    print(f"  Window-level Spearman r: {test_result['window_metrics']['spearman_r']:.4f} (p={test_result['window_metrics']['spearman_p']:.2e})")
     if test_result['subject_metrics']:
         print(f"  Subject-level MSE: {test_result['subject_metrics']['mse']:.4f}")
-        print(f"  Subject-level r: {test_result['subject_metrics']['r']:.4f}")
+        print(f"  Subject-level Pearson r: {test_result['subject_metrics']['pearson_r']:.4f} (p={test_result['subject_metrics']['pearson_p']:.2e})")
+        print(f"  Subject-level Spearman r: {test_result['subject_metrics']['spearman_r']:.4f} (p={test_result['subject_metrics']['spearman_p']:.2e})")
+
+    # Permutation testing for significance
+    print(f"\nRunning permutation tests (1000 permutations)...")
+
+    # Subject-level permutation tests (most important)
+    perm_results = {}
+    if test_result['subject_metrics']:
+        subj_preds, _ = aggregate_window_predictions(
+            test_result['predictions'], test_result['subject_ids']
+        )
+        subj_targets, _ = aggregate_window_predictions(
+            test_result['targets'], test_result['subject_ids']
+        )
+
+        # Pearson permutation test
+        perm_pearson = permutation_test(subj_preds, subj_targets, n_permutations=1000, metric='pearson')
+        perm_results['subject_pearson'] = perm_pearson
+
+        # Spearman permutation test
+        perm_spearman = permutation_test(subj_preds, subj_targets, n_permutations=1000, metric='spearman')
+        perm_results['subject_spearman'] = perm_spearman
+
+        print(f"  Subject Pearson r: {perm_pearson['pearson_r']:.4f}, perm p-value: {perm_pearson['pearson_perm_p']:.4f}")
+        print(f"  Subject Spearman r: {perm_spearman['spearman_r']:.4f}, perm p-value: {perm_spearman['spearman_perm_p']:.4f}")
 
     # Save predictions
     save_predictions(
@@ -409,6 +434,7 @@ def train_fold(model_name, fold_path, config, device):
         'test_metrics': {
             'window_level': test_result['window_metrics'],
             'subject_level': test_result['subject_metrics'],
+            'permutation_tests': perm_results,
         },
 
         'data_info': {
@@ -517,11 +543,9 @@ def aggregate_results(model_name, all_results):
         'per_fold_detailed': all_results,
     }
 
-    # Save aggregate summary
-    output_dir = Path(f"../../results/enhanced/{model_name}_enhanced")
-    if not output_dir.parent.exists():
-        # Fallback: try from project root
-        output_dir = Path(f"results/enhanced/{model_name}_enhanced")
+    # Save aggregate summary (use absolute path from project root)
+    project_root = Path(__file__).parent.parent.parent
+    output_dir = project_root / "results" / "enhanced" / f"{model_name}_enhanced"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     with open(output_dir / f"{model_name}_aggregate_summary.json", 'w') as f:
