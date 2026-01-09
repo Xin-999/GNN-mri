@@ -79,12 +79,12 @@ def objective(trial, model_name, fold_paths, device, n_epochs=15, use_enhanced=F
         torch.backends.cudnn.benchmark = False
 
     # Smaller, memory-friendly search space
-    hidden_dim = trial.suggest_categorical('hidden_dim', [32, 64, 128])
+    hidden_dim = trial.suggest_categorical('hidden_dim', [32, 64, 128,256])
     lr = trial.suggest_float('lr', 1e-4, 1e-3, log=True)
     weight_decay = trial.suggest_float('weight_decay', 1e-6, 1e-4, log=True)
     dropout = trial.suggest_float('dropout', 0.1, 0.3)
-    batch_size = trial.suggest_categorical('batch_size', [8, 16])
-    n_layers = trial.suggest_int('n_layers', 2, 3)
+    batch_size = trial.suggest_categorical('batch_size', [8, 16,32])
+    n_layers = trial.suggest_int('n_layers', 2, 4)
 
     # Model-specific hyperparameters (compact)
     if model_name == 'braingt':
