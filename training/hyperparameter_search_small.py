@@ -47,20 +47,21 @@ from utils.data_utils import (
 )
 
 
-def objective(trial, model_name, fold_path, device, n_epochs=15, use_enhanced=False):
+def objective(trial, model_name, fold_paths, device, n_epochs=15, use_enhanced=False):
     """
     Objective function for compact Optuna optimization.
+    Evaluates hyperparameters across ALL folds.
 
     Args:
         trial: Optuna trial object
         model_name: Model architecture
-        fold_path: Path to fold data
+        fold_paths: List of paths to all fold data files
         device: 'cuda' or 'cpu'
         n_epochs: Number of epochs to train
         use_enhanced: Use enhanced models (default: False)
 
     Returns:
-        validation_metric: Pearson correlation (r) to maximize
+        validation_metric: Average Pearson correlation (r) across all folds to maximize
     """
     # Clear GPU cache between trials to reduce fragmentation
     if torch.cuda.is_available():
@@ -97,154 +98,172 @@ def objective(trial, model_name, fold_path, device, n_epochs=15, use_enhanced=Fa
         n_heads = trial.suggest_categorical('n_heads', [2, 4])
         refine_graph = trial.suggest_categorical('refine_graph', [True, False])
 
-    # Load data
-    train_graphs, val_graphs, test_graphs, info = load_graphs_with_normalization(
-        fold_path,
-        normalize_method='standard',
-    )
+    # Evaluate across all folds
+    fold_val_r_scores = []
 
-    train_loader, val_loader, _ = create_dataloaders(
-        train_graphs, val_graphs, test_graphs,
-        batch_size=batch_size,
-        num_workers=0,
-        pin_memory=(device == 'cuda'),
-    )
+    for fold_idx, fold_path in enumerate(fold_paths):
+        # Load data for this fold
+        train_graphs, val_graphs, test_graphs, info = load_graphs_with_normalization(
+            fold_path,
+            normalize_method='standard',
+        )
 
-    # Initialize model
-    in_dim = train_graphs[0].x.size(-1)
+        train_loader, val_loader, _ = create_dataloaders(
+            train_graphs, val_graphs, test_graphs,
+            batch_size=batch_size,
+            num_workers=0,
+            pin_memory=(device == 'cuda'),
+        )
 
-    if use_enhanced:
-        if model_name == 'braingt':
-            model = BrainGTEnhanced(
-                in_dim=in_dim,
-                hidden_dim=hidden_dim,
-                n_rois=268,
-                n_transformer_layers=n_transformer_layers,
-                n_gnn_layers=n_gnn_layers,
-                n_heads=n_heads,
-                dropout=dropout,
-            )
-        elif model_name == 'braingnn':
-            model = BrainGNNEnhanced(
-                in_dim=in_dim,
-                hidden_dim=hidden_dim,
-                n_rois=268,
-                n_layers=n_layers,
-                dropout=dropout,
-            )
-        elif model_name == 'fbnetgen':
-            model = FBNetGenFromGraphEnhanced(
-                in_dim=in_dim,
-                hidden_dim=hidden_dim,
-                n_layers=n_layers,
-                n_heads=n_heads,
-                dropout=dropout,
-            )
+        # Initialize model for this fold
+        in_dim = train_graphs[0].x.size(-1)
+
+        if use_enhanced:
+            if model_name == 'braingt':
+                model = BrainGTEnhanced(
+                    in_dim=in_dim,
+                    hidden_dim=hidden_dim,
+                    n_rois=268,
+                    n_transformer_layers=n_transformer_layers,
+                    n_gnn_layers=n_gnn_layers,
+                    n_heads=n_heads,
+                    dropout=dropout,
+                )
+            elif model_name == 'braingnn':
+                model = BrainGNNEnhanced(
+                    in_dim=in_dim,
+                    hidden_dim=hidden_dim,
+                    n_rois=268,
+                    n_layers=n_layers,
+                    dropout=dropout,
+                )
+            elif model_name == 'fbnetgen':
+                model = FBNetGenFromGraphEnhanced(
+                    in_dim=in_dim,
+                    hidden_dim=hidden_dim,
+                    n_layers=n_layers,
+                    n_heads=n_heads,
+                    dropout=dropout,
+                )
+            else:
+                raise ValueError(f"Unknown model: {model_name}")
         else:
-            raise ValueError(f"Unknown model: {model_name}")
-    else:
-        if model_name == 'braingt':
-            model = BrainGT(
-                in_dim=in_dim,
-                hidden_dim=hidden_dim,
-                n_rois=268,
-                n_transformer_layers=n_transformer_layers,
-                n_gnn_layers=n_gnn_layers,
-                n_heads=n_heads,
-                dropout=dropout,
-                pool_type=pool_type,
-            )
-        elif model_name == 'braingnn':
-            model = SimpleBrainGNN(
-                in_dim=in_dim,
-                hidden_dim=hidden_dim,
-                n_rois=268,
-                n_communities=n_communities,
-                n_layers=n_layers,
-                dropout=dropout,
-            )
-        elif model_name == 'fbnetgen':
-            model = FBNetGenFromGraph(
-                in_dim=in_dim,
-                hidden_dim=hidden_dim,
-                n_layers=n_layers,
-                n_heads=n_heads,
-                dropout=dropout,
-                refine_graph=refine_graph,
-            )
-        else:
-            raise ValueError(f"Unknown model: {model_name}")
+            if model_name == 'braingt':
+                model = BrainGT(
+                    in_dim=in_dim,
+                    hidden_dim=hidden_dim,
+                    n_rois=268,
+                    n_transformer_layers=n_transformer_layers,
+                    n_gnn_layers=n_gnn_layers,
+                    n_heads=n_heads,
+                    dropout=dropout,
+                    pool_type=pool_type,
+                )
+            elif model_name == 'braingnn':
+                model = SimpleBrainGNN(
+                    in_dim=in_dim,
+                    hidden_dim=hidden_dim,
+                    n_rois=268,
+                    n_communities=n_communities,
+                    n_layers=n_layers,
+                    dropout=dropout,
+                )
+            elif model_name == 'fbnetgen':
+                model = FBNetGenFromGraph(
+                    in_dim=in_dim,
+                    hidden_dim=hidden_dim,
+                    n_layers=n_layers,
+                    n_heads=n_heads,
+                    dropout=dropout,
+                    refine_graph=refine_graph,
+                )
+            else:
+                raise ValueError(f"Unknown model: {model_name}")
 
-    model = model.to(device)
+        model = model.to(device)
 
-    # Optimizer
-    optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
-    criterion = nn.MSELoss()
+        # Optimizer
+        optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+        criterion = nn.MSELoss()
 
-    best_val_r = -float('inf')
-    best_val_metrics = {}
-    patience_counter = 0
-    patience = 5
+        best_val_r = -float('inf')
+        best_val_metrics = {}
+        patience_counter = 0
+        patience = 5
 
-    for epoch in range(n_epochs):
-        try:
-            model.train()
-            for batch in train_loader:
-                batch = batch.to(device)
-                optimizer.zero_grad()
-                preds = model(batch)
-                loss = criterion(preds, batch.y.float())
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-                optimizer.step()
-
-            # Validate
-            model.eval()
-            all_preds = []
-            all_targets = []
-
-            with torch.no_grad():
-                for batch in val_loader:
+        for epoch in range(n_epochs):
+            try:
+                model.train()
+                for batch in train_loader:
                     batch = batch.to(device)
+                    optimizer.zero_grad()
                     preds = model(batch)
-                    all_preds.append(preds.cpu())
-                    all_targets.append(batch.y.cpu())
-        except RuntimeError as e:
-            if "out of memory" in str(e).lower():
-                print(f"\n⚠️  Trial {trial.number} failed: CUDA Out of Memory")
-                print(f"   Config: hidden_dim={hidden_dim}, batch_size={batch_size}, n_layers={n_layers}")
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
+                    loss = criterion(preds, batch.y.float())
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                    optimizer.step()
+
+                # Validate
+                model.eval()
+                all_preds = []
+                all_targets = []
+
+                with torch.no_grad():
+                    for batch in val_loader:
+                        batch = batch.to(device)
+                        preds = model(batch)
+                        all_preds.append(preds.cpu())
+                        all_targets.append(batch.y.cpu())
+            except RuntimeError as e:
+                if "out of memory" in str(e).lower():
+                    print(f"\n⚠️  Trial {trial.number} Fold {fold_idx+1}/{len(fold_paths)} failed: CUDA OOM")
+                    print(f"   Config: hidden_dim={hidden_dim}, batch_size={batch_size}, n_layers={n_layers}")
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                    raise optuna.TrialPruned()
+                raise
+
+            predictions = torch.cat(all_preds).numpy()
+            targets = torch.cat(all_targets).numpy()
+
+            val_metrics = compute_metrics(predictions, targets, prefix='')
+            val_r = val_metrics['r']
+
+            if val_r > best_val_r + 1e-5:
+                best_val_r = val_r
+                best_val_metrics = val_metrics
+                patience_counter = 0
+            else:
+                patience_counter += 1
+
+            if patience_counter >= patience:
+                break
+
+            # Report intermediate value (per fold, per epoch)
+            trial.report(best_val_r, fold_idx * n_epochs + epoch)
+            if trial.should_prune():
                 raise optuna.TrialPruned()
-            raise
 
-        predictions = torch.cat(all_preds).numpy()
-        targets = torch.cat(all_targets).numpy()
+        # Store best validation r for this fold
+        fold_val_r_scores.append(best_val_r)
+        print(f"  Fold {fold_idx+1}/{len(fold_paths)}: val_r = {best_val_r:.4f}")
 
-        val_metrics = compute_metrics(predictions, targets, prefix='')
-        val_r = val_metrics['r']
+        # Clear GPU cache after each fold
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
-        if val_r > best_val_r + 1e-5:
-            best_val_r = val_r
-            best_val_metrics = val_metrics
-            patience_counter = 0
-        else:
-            patience_counter += 1
+    # Average validation r across all folds
+    avg_val_r = np.mean(fold_val_r_scores)
+    std_val_r = np.std(fold_val_r_scores)
 
-        if patience_counter >= patience:
-            break
+    trial.set_user_attr('avg_val_r', avg_val_r)
+    trial.set_user_attr('std_val_r', std_val_r)
+    trial.set_user_attr('fold_val_r_scores', fold_val_r_scores)
+    trial.set_user_attr('n_folds', len(fold_paths))
 
-        trial.report(-val_r, epoch)
-        if trial.should_prune():
-            raise optuna.TrialPruned()
+    print(f"Trial {trial.number}: Avg val_r = {avg_val_r:.4f} ± {std_val_r:.4f} across {len(fold_paths)} folds")
 
-    trial.set_user_attr('best_val_r', best_val_r)
-    trial.set_user_attr('best_val_mse', best_val_metrics.get('mse', float('nan')))
-    trial.set_user_attr('best_val_mae', best_val_metrics.get('mae', float('nan')))
-    trial.set_user_attr('best_val_r2', best_val_metrics.get('r2', float('nan')))
-    trial.set_user_attr('best_val_p_value', best_val_metrics.get('p_value', float('nan')))
-
-    return best_val_r
+    return avg_val_r
 
 
 def main():
@@ -287,14 +306,15 @@ def main():
 
     fold_dir = Path(args.fold_dir)
     if args.fold_name:
-        fold_path = fold_dir / f"{args.fold_name}.pkl"
+        # Single fold mode (for quick testing)
+        fold_paths = [fold_dir / f"{args.fold_name}.pkl"]
+        print(f"Using single fold: {fold_paths[0].name}\n")
     else:
-        fold_files = sorted(fold_dir.glob("graphs_outer*.pkl"))
-        if not fold_files:
+        # All folds mode (default - for proper CV)
+        fold_paths = sorted(fold_dir.glob("graphs_outer*.pkl"))
+        if not fold_paths:
             raise FileNotFoundError(f"No fold files found in {fold_dir}")
-        fold_path = fold_files[0]
-
-    print(f"Using fold: {fold_path.name}\n")
+        print(f"Using all {len(fold_paths)} folds for cross-validation\n")
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -311,10 +331,11 @@ def main():
     print(f"Starting compact hyperparameter search for {args.model.upper()} ({model_type})")
     print(f"Number of trials: {args.n_trials}")
     print(f"Epochs per trial: {args.n_epochs}")
-    print(f"Optimizing for: Pearson correlation (r)\n")
+    print(f"Number of folds: {len(fold_paths)}")
+    print(f"Optimizing for: Average Pearson correlation (r) across all folds\n")
 
     study.optimize(
-        lambda trial: objective(trial, args.model, str(fold_path), args.device, args.n_epochs, args.use_enhanced),
+        lambda trial: objective(trial, args.model, [str(p) for p in fold_paths], args.device, args.n_epochs, args.use_enhanced),
         n_trials=args.n_trials,
         n_jobs=args.n_jobs,
         show_progress_bar=True,
@@ -325,12 +346,9 @@ def main():
     print("Search Results")
     print(f"{'='*60}\n")
     print(f"Best trial #{best_trial.number}")
-    print(f"\nValidation Metrics:")
-    print(f"  Pearson r:  {best_trial.user_attrs.get('best_val_r', best_trial.value):.4f}")
-    print(f"  MSE:        {best_trial.user_attrs.get('best_val_mse', float('nan')):.4f}")
-    print(f"  MAE:        {best_trial.user_attrs.get('best_val_mae', float('nan')):.4f}")
-    print(f"  R2:         {best_trial.user_attrs.get('best_val_r2', float('nan')):.4f}")
-    print(f"  p-value:    {best_trial.user_attrs.get('best_val_p_value', float('nan')):.4e}")
+    print(f"\nValidation Metrics (averaged across {best_trial.user_attrs.get('n_folds', len(fold_paths))} folds):")
+    print(f"  Avg Pearson r:  {best_trial.user_attrs.get('avg_val_r', best_trial.value):.4f} ± {best_trial.user_attrs.get('std_val_r', 0):.4f}")
+    print(f"  Per-fold r:     {best_trial.user_attrs.get('fold_val_r_scores', [])}")
 
     print("\nBest hyperparameters:")
     for key, value in best_trial.params.items():
@@ -339,15 +357,14 @@ def main():
     results = {
         'model': args.model,
         'model_type': 'enhanced' if args.use_enhanced else 'base',
-        'fold': fold_path.name,
+        'n_folds': len(fold_paths),
+        'folds': [p.name for p in fold_paths],
         'n_trials': args.n_trials,
         'best_value': best_trial.value,
         'best_metrics': {
-            'r': best_trial.user_attrs.get('best_val_r', best_trial.value),
-            'mse': best_trial.user_attrs.get('best_val_mse', float('nan')),
-            'mae': best_trial.user_attrs.get('best_val_mae', float('nan')),
-            'r2': best_trial.user_attrs.get('best_val_r2', float('nan')),
-            'p_value': best_trial.user_attrs.get('best_val_p_value', float('nan')),
+            'avg_r': best_trial.user_attrs.get('avg_val_r', best_trial.value),
+            'std_r': best_trial.user_attrs.get('std_val_r', 0),
+            'fold_r_scores': best_trial.user_attrs.get('fold_val_r_scores', []),
         },
         'best_params': best_trial.params,
         'all_trials': [
@@ -357,11 +374,9 @@ def main():
                 'params': trial.params,
                 'state': str(trial.state),
                 'metrics': {
-                    'r': trial.user_attrs.get('best_val_r', trial.value),
-                    'mse': trial.user_attrs.get('best_val_mse', float('nan')),
-                    'mae': trial.user_attrs.get('best_val_mae', float('nan')),
-                    'r2': trial.user_attrs.get('best_val_r2', float('nan')),
-                    'p_value': trial.user_attrs.get('best_val_p_value', float('nan')),
+                    'avg_r': trial.user_attrs.get('avg_val_r', trial.value),
+                    'std_r': trial.user_attrs.get('std_val_r', 0),
+                    'n_folds': trial.user_attrs.get('n_folds', len(fold_paths)),
                 }
             }
             for trial in study.trials
