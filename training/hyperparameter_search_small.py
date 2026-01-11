@@ -80,14 +80,14 @@ def objective(trial, model_name, fold_paths, device, n_epochs=15, use_enhanced=F
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
-    # Set seed for this trial (based on trial number for reproducibility)
+    # Set seed for reproducibility (same seed for all trials for consistency)
     import random
-    trial_seed = 42 + trial.number
-    random.seed(trial_seed)
-    torch.manual_seed(trial_seed)
-    np.random.seed(trial_seed)
+    seed = 42
+    random.seed(seed)
+    torch.manual_seed(seed)
+    np.random.seed(seed)
     if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(trial_seed)
+        torch.cuda.manual_seed_all(seed)
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
 
