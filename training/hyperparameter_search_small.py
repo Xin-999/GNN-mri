@@ -210,7 +210,14 @@ def objective(trial, model_name, fold_paths, device, n_epochs=15, use_enhanced=F
                 for batch in train_loader:
                     batch = batch.to(device)
                     optimizer.zero_grad()
-                    preds = model(batch)
+
+                    # Handle models that return tuple (predictions, extra_info)
+                    output = model(batch)
+                    if isinstance(output, tuple):
+                        preds = output[0]  # Extract predictions from tuple
+                    else:
+                        preds = output
+
                     loss = criterion(preds, batch.y.float())
                     loss.backward()
                     torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
@@ -224,7 +231,14 @@ def objective(trial, model_name, fold_paths, device, n_epochs=15, use_enhanced=F
                 with torch.no_grad():
                     for batch in val_loader:
                         batch = batch.to(device)
-                        preds = model(batch)
+
+                        # Handle models that return tuple (predictions, extra_info)
+                        output = model(batch)
+                        if isinstance(output, tuple):
+                            preds = output[0]
+                        else:
+                            preds = output
+
                         all_preds.append(preds.cpu())
                         all_targets.append(batch.y.cpu())
             except RuntimeError as e:
