@@ -320,9 +320,12 @@ def main():
         args.device = 'cpu'
 
     fold_dir = Path(args.fold_dir)
+    fold_config_str = ""  # For unique output directory naming
+
     if args.fold_name:
         # Single fold mode (for quick testing)
         fold_paths = [fold_dir / f"{args.fold_name}.pkl"]
+        fold_config_str = f"single_fold_{args.fold_name}"
         print(f"Using single fold: {fold_paths[0].name}\n")
     elif args.fold_indices is not None:
         # Specific fold indices mode
@@ -336,6 +339,10 @@ def main():
                 raise ValueError(f"Fold index {idx} out of range (0-{len(all_fold_paths)-1})")
             fold_paths.append(all_fold_paths[idx])
 
+        # Create compact string for fold indices
+        fold_indices_str = '_'.join(map(str, args.fold_indices))
+        fold_config_str = f"folds_{len(fold_paths)}_indices_{fold_indices_str}"
+
         print(f"Using {len(fold_paths)} selected folds:")
         for idx, fp in zip(args.fold_indices, fold_paths):
             print(f"  [{idx}] {fp.name}")
@@ -345,10 +352,15 @@ def main():
         fold_paths = sorted(fold_dir.glob("graphs_outer*.pkl"))
         if not fold_paths:
             raise FileNotFoundError(f"No fold files found in {fold_dir}")
+        fold_config_str = f"all_{len(fold_paths)}_folds"
         print(f"Using all {len(fold_paths)} folds for cross-validation\n")
 
-    output_dir = Path(args.output_dir)
+    # Create unique output directory based on configuration
+    base_output_dir = Path(args.output_dir)
+    output_dir = base_output_dir / fold_config_str / f"trials_{args.n_trials}"
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"Results will be saved to: {output_dir}\n")
 
     study_name = args.study_name or f"{args.model}_search_small"
     study = optuna.create_study(
