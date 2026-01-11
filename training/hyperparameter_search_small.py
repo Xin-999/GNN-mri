@@ -3,13 +3,26 @@
 Compact Hyperparameter Search using Optuna
 ==========================================
 Smaller, memory-friendly Optuna search to reduce CUDA OOM risk.
+Evaluates each hyperparameter configuration across multiple folds.
 
 Usage:
-    # Search for BrainGNN (compact space)
+    # Search across ALL 25 folds (default - most rigorous)
     python training/hyperparameter_search_small.py --model braingnn --n_trials 30
 
-    # Search for FBNetGen (compact space, enhanced)
+    # Search on specific folds only (e.g., first 5 folds)
+    python training/hyperparameter_search_small.py --model braingnn --n_trials 30 --fold_indices 0 1 2 3 4
+
+    # Quick test with single fold
+    python training/hyperparameter_search_small.py --model braingnn --n_trials 5 --fold_name graphs_outer1_inner1
+
+    # Enhanced model search
     python training/hyperparameter_search_small.py --model fbnetgen --use_enhanced --n_trials 30
+
+Reports:
+    - Best average r across all folds (most generalizable config)
+    - Absolute best r from any single fold (highest achievable performance)
+    - Saves results to: hyperparameter_search_results_small/
+    - Saves best summary to: hyperparameter_search_results_small/best_results_summary/
 """
 
 import argparse
@@ -288,7 +301,9 @@ def main():
     parser.add_argument('--fold_dir', type=str, default='data/folds_data',
                         help='Directory with fold data')
     parser.add_argument('--fold_name', type=str, default=None,
-                        help='Specific fold (default: first fold)')
+                        help='Specific fold name (e.g., graphs_outer1_inner1)')
+    parser.add_argument('--fold_indices', nargs='+', type=int, default=None,
+                        help='Specific fold indices to use (0-indexed). E.g., --fold_indices 0 1 2 for first 3 folds')
 
     # Output
     parser.add_argument('--output_dir', type=str, default='hyperparameter_search_results_small',
@@ -309,6 +324,22 @@ def main():
         # Single fold mode (for quick testing)
         fold_paths = [fold_dir / f"{args.fold_name}.pkl"]
         print(f"Using single fold: {fold_paths[0].name}\n")
+    elif args.fold_indices is not None:
+        # Specific fold indices mode
+        all_fold_paths = sorted(fold_dir.glob("graphs_outer*.pkl"))
+        if not all_fold_paths:
+            raise FileNotFoundError(f"No fold files found in {fold_dir}")
+
+        fold_paths = []
+        for idx in args.fold_indices:
+            if idx < 0 or idx >= len(all_fold_paths):
+                raise ValueError(f"Fold index {idx} out of range (0-{len(all_fold_paths)-1})")
+            fold_paths.append(all_fold_paths[idx])
+
+        print(f"Using {len(fold_paths)} selected folds:")
+        for idx, fp in zip(args.fold_indices, fold_paths):
+            print(f"  [{idx}] {fp.name}")
+        print()
     else:
         # All folds mode (default - for proper CV)
         fold_paths = sorted(fold_dir.glob("graphs_outer*.pkl"))
@@ -341,18 +372,54 @@ def main():
         show_progress_bar=True,
     )
 
+    # Find absolute best r from any fold in any trial
+    best_single_fold_r = -float('inf')
+    best_single_fold_info = None
+
+    for trial in study.trials:
+        if trial.state != optuna.trial.TrialState.COMPLETE:
+            continue
+
+        fold_scores = trial.user_attrs.get('fold_val_r_scores', [])
+        if fold_scores:
+            for fold_idx, fold_r in enumerate(fold_scores):
+                if fold_r > best_single_fold_r:
+                    best_single_fold_r = fold_r
+                    best_single_fold_info = {
+                        'trial_number': trial.number,
+                        'fold_index': fold_idx,
+                        'fold_name': fold_paths[fold_idx].name if fold_idx < len(fold_paths) else f"fold_{fold_idx}",
+                        'r_value': fold_r,
+                        'params': trial.params,
+                        'avg_r_for_trial': trial.user_attrs.get('avg_val_r', trial.value),
+                        'std_r_for_trial': trial.user_attrs.get('std_val_r', 0),
+                    }
+
     best_trial = study.best_trial
     print(f"\n{'='*60}")
     print("Search Results")
     print(f"{'='*60}\n")
-    print(f"Best trial #{best_trial.number}")
-    print(f"\nValidation Metrics (averaged across {best_trial.user_attrs.get('n_folds', len(fold_paths))} folds):")
-    print(f"  Avg Pearson r:  {best_trial.user_attrs.get('avg_val_r', best_trial.value):.4f} ± {best_trial.user_attrs.get('std_val_r', 0):.4f}")
-    print(f"  Per-fold r:     {best_trial.user_attrs.get('fold_val_r_scores', [])}")
 
-    print("\nBest hyperparameters:")
+    print(f"🏆 BEST AVERAGE r ACROSS FOLDS (Trial #{best_trial.number}):")
+    print(f"  Avg Pearson r:  {best_trial.user_attrs.get('avg_val_r', best_trial.value):.4f} ± {best_trial.user_attrs.get('std_val_r', 0):.4f}")
+    print(f"  Number of folds: {best_trial.user_attrs.get('n_folds', len(fold_paths))}")
+
+    print("\n  Best hyperparameters (for avg r):")
     for key, value in best_trial.params.items():
-        print(f"  {key}: {value}")
+        print(f"    {key}: {value}")
+
+    if best_single_fold_info:
+        print(f"\n{'='*60}")
+        print(f"⭐ ABSOLUTE BEST r FROM ANY SINGLE FOLD:")
+        print(f"  Best single fold r: {best_single_fold_info['r_value']:.4f}")
+        print(f"  From trial #{best_single_fold_info['trial_number']}")
+        print(f"  From fold: {best_single_fold_info['fold_name']} (index {best_single_fold_info['fold_index']})")
+        print(f"  That trial's avg r: {best_single_fold_info['avg_r_for_trial']:.4f} ± {best_single_fold_info['std_r_for_trial']:.4f}")
+
+        print("\n  Hyperparameters for this trial:")
+        for key, value in best_single_fold_info['params'].items():
+            print(f"    {key}: {value}")
+        print(f"{'='*60}")
 
     results = {
         'model': args.model,
@@ -360,13 +427,14 @@ def main():
         'n_folds': len(fold_paths),
         'folds': [p.name for p in fold_paths],
         'n_trials': args.n_trials,
-        'best_value': best_trial.value,
-        'best_metrics': {
+        'best_avg_trial': {
+            'trial_number': best_trial.number,
             'avg_r': best_trial.user_attrs.get('avg_val_r', best_trial.value),
             'std_r': best_trial.user_attrs.get('std_val_r', 0),
             'fold_r_scores': best_trial.user_attrs.get('fold_val_r_scores', []),
+            'params': best_trial.params,
         },
-        'best_params': best_trial.params,
+        'best_single_fold': best_single_fold_info if best_single_fold_info else {},
         'all_trials': [
             {
                 'number': trial.number,
@@ -377,18 +445,50 @@ def main():
                     'avg_r': trial.user_attrs.get('avg_val_r', trial.value),
                     'std_r': trial.user_attrs.get('std_val_r', 0),
                     'n_folds': trial.user_attrs.get('n_folds', len(fold_paths)),
+                    'fold_r_scores': trial.user_attrs.get('fold_val_r_scores', []),
                 }
             }
             for trial in study.trials
         ],
     }
 
+    # Save main results file
     model_suffix = '_enhanced' if args.use_enhanced else '_base'
     results_path = output_dir / f"{args.model}{model_suffix}_search_results.json"
     with open(results_path, 'w') as f:
         json.dump(results, f, indent=2)
 
-    print(f"\nResults saved to {results_path}")
+    print(f"\nFull results saved to {results_path}")
+
+    # Save separate best results summary
+    summary_dir = output_dir / 'best_results_summary'
+    summary_dir.mkdir(parents=True, exist_ok=True)
+
+    best_summary = {
+        'model': args.model,
+        'model_type': 'enhanced' if args.use_enhanced else 'base',
+        'search_date': str(Path(results_path).stat().st_mtime) if results_path.exists() else 'N/A',
+        'n_trials': args.n_trials,
+        'n_folds': len(fold_paths),
+        'best_avg_r_trial': {
+            'description': 'Trial with best average r across all folds',
+            'trial_number': best_trial.number,
+            'avg_r': best_trial.user_attrs.get('avg_val_r', best_trial.value),
+            'std_r': best_trial.user_attrs.get('std_val_r', 0),
+            'params': best_trial.params,
+            'fold_r_scores': best_trial.user_attrs.get('fold_val_r_scores', []),
+        },
+        'absolute_best_single_fold': {
+            'description': 'Absolute highest r value from any single fold across all trials',
+            **best_single_fold_info
+        } if best_single_fold_info else {},
+    }
+
+    summary_path = summary_dir / f"{args.model}{model_suffix}_best_summary.json"
+    with open(summary_path, 'w') as f:
+        json.dump(best_summary, f, indent=2)
+
+    print(f"Best results summary saved to {summary_path}")
 
     try:
         import plotly
