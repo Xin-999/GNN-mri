@@ -330,6 +330,10 @@ def train_fold(
     val_metrics = evaluate(model, val_loader, device, scaler=info.get("scaler"))
     test_metrics = evaluate(model, test_loader, device, scaler=info.get("scaler"))
 
+    val_r = get_metric(val_metrics, "subj_r", "win_r")
+    test_r = get_metric(test_metrics, "subj_r", "win_r")
+    print(f"Fold {fold_path.name}: val_r={val_r:.4f} | test_r={test_r:.4f}")
+
     return {
         "fold": fold_path.name,
         "train_loss": float(train_loss),
