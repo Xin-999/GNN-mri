@@ -4,6 +4,50 @@ Diffusion GNN hyperparameter search (APPNP/SGC).
 
 Runs Optuna across folds, tracks subject-level Pearson r and MSE,
 and saves full results to JSON.
+
+Examples:
+  # Full argument example (APPNP)
+  python training/hyperparameter_search_diffusion.py 
+    --model appnp 
+    --n_trials 30 
+    --n_epochs 15 
+    --patience 5 
+    --n_jobs 1 
+    --fold_dir data/folds_data 
+    --output_dir hyperparameter_search_results_diffusion 
+    --study_name appnp_diffusion_search 
+    --device cuda 
+    --objective composite 
+    --mse_weight 0.5 
+    --normalize_method standard
+
+  # Single-fold quick run
+  python training/hyperparameter_search_diffusion.py \
+    --model appnp 
+    --n_trials 5 
+    --fold_name graphs_outer1_inner1
+
+  # Selected folds by index (0-based)
+  python training/hyperparameter_search_diffusion.py 
+    --model sgc 
+    --n_trials 10 
+    --fold_indices 17
+
+Arguments:
+  --model: appnp | sgc
+  --n_trials: number of Optuna trials
+  --n_epochs: epochs per trial
+  --patience: early-stop patience per fold
+  --n_jobs: parallel Optuna jobs
+  --fold_dir: directory with fold .pkl files
+  --fold_name: specific fold name (mutually exclusive with --fold_indices)
+  --fold_indices: list of fold indices to use
+  --output_dir: results directory
+  --study_name: Optuna study name
+  --device: cuda | cpu | auto
+  --objective: pearson_r | mse | composite
+  --mse_weight: weight for composite objective (r - w * mse)
+  --normalize_method: standard | minmax | robust
 """
 
 import argparse

@@ -2,6 +2,82 @@
 """
 Train diffusion-style GNNs (APPNP/SGC) across CV folds.
 Saves per-fold metrics and aggregate summaries to JSON.
+
+Examples:
+  # Full argument example (APPNP)
+  python training/train_gnn_diffusion.py \
+    --model appnp \
+    --fold_dir data/folds_data \
+    --output_dir results/gnn_diffusion \
+    --run_name appnp_full \
+    --device cuda \
+    --seed 42 \
+    --normalize_method standard \
+    --epochs 30 \
+    --patience 6 \
+    --batch_size 16 \
+    --lr 0.001 \
+    --weight_decay 0.0001 \
+    --early_stop_metric subj_mse \
+    --hidden_dim 128 \
+    --mlp_layers 2 \
+    --dropout 0.2 \
+    --readout mean \
+    --diffusion_steps 10 \
+    --alpha 0.1 \
+    --diffusion_dropout 0.0
+
+  # Full argument example (SGC)
+  python training/train_gnn_diffusion.py \
+    --model sgc \
+    --fold_dir data/folds_data \
+    --output_dir results/gnn_diffusion \
+    --run_name sgc_full \
+    --device cuda \
+    --seed 42 \
+    --normalize_method standard \
+    --epochs 30 \
+    --patience 6 \
+    --batch_size 16 \
+    --lr 0.001 \
+    --weight_decay 0.0001 \
+    --early_stop_metric subj_mse \
+    --hidden_dim 128 \
+    --dropout 0.2 \
+    --readout mean \
+    --sgc_k 3 \
+    --no_edge_weight
+
+  # Single-fold quick run
+  python training/train_gnn_diffusion.py \
+    --model appnp \
+    --fold_name graphs_outer1_inner1
+
+Arguments:
+  --model: appnp | sgc
+  --fold_dir: directory with fold .pkl files
+  --fold_name: specific fold name (mutually exclusive with --fold_indices)
+  --fold_indices: list of fold indices to use
+  --output_dir: results directory
+  --run_name: subfolder name for this run
+  --device: cuda | cpu | auto
+  --seed: random seed
+  --normalize_method: standard | minmax | robust
+  --epochs: training epochs per fold
+  --patience: early-stop patience
+  --batch_size: batch size
+  --lr: learning rate
+  --weight_decay: weight decay
+  --early_stop_metric: subj_mse | subj_r | win_mse | win_r
+  --hidden_dim: hidden dimension size
+  --mlp_layers: MLP layers (APPNP only)
+  --dropout: dropout for MLP/head
+  --readout: mean | add
+  --diffusion_steps: APPNP propagation steps (APPNP only)
+  --alpha: APPNP teleport probability (APPNP only)
+  --diffusion_dropout: APPNP edge dropout (APPNP only)
+  --sgc_k: SGC propagation steps (SGC only)
+  --no_edge_weight: disable edge weights (default uses edge weights)
 """
 
 import argparse
