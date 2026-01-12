@@ -13,11 +13,13 @@ Models:
 from .fbnetgen import FBNetGen, TimeSeriesEncoder, GraphGenerator
 from .brain_gt import BrainGT, BrainGraphTransformer
 from .brain_gnn import BrainGNN, ROIAwareConv, ROIPool
+from .gnn_diffusion import AppnpDiffusionRegressor, SgcRegressor
 from .ensemble import EnsembleModel, WeightedEnsemble
 
 __all__ = [
     'FBNetGen', 'TimeSeriesEncoder', 'GraphGenerator',
     'BrainGT', 'BrainGraphTransformer',
     'BrainGNN', 'ROIAwareConv', 'ROIPool',
+    'AppnpDiffusionRegressor', 'SgcRegressor',
     'EnsembleModel', 'WeightedEnsemble',
 ]
