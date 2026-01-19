@@ -54,6 +54,7 @@ import argparse
 import json
 import random
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -79,6 +80,22 @@ from utils.data_utils import (
     create_dataloaders,
     load_graphs_with_normalization,
 )
+
+
+def ensure_unique_output_dir(output_dir: Path) -> Path:
+    output_dir = Path(output_dir)
+    if output_dir.exists():
+        if output_dir.is_dir():
+            if any(output_dir.iterdir()):
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                output_dir = output_dir.with_name(f"{output_dir.name}_{timestamp}")
+                print(f"Output directory not empty, using: {output_dir}")
+        else:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_dir = output_dir.with_name(f"{output_dir.name}_{timestamp}")
+            print(f"Output path exists and is not a directory, using: {output_dir}")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return output_dir
 
 
 def set_seed(seed: int) -> None:
@@ -428,7 +445,7 @@ def main() -> None:
 
     base_output_dir = Path(args.output_dir)
     output_dir = base_output_dir / fold_config_str / f"trials_{args.n_trials}"
-    output_dir.mkdir(parents=True, exist_ok=True)
+    output_dir = ensure_unique_output_dir(output_dir)
 
     study_name = args.study_name or f"{args.model}_diffusion_search"
     direction = "minimize" if args.objective == "mse" else "maximize"

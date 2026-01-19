@@ -518,7 +518,21 @@ def main():
     # Output directory (use absolute path from project root)
     if args.output_dir is None:
         project_root = Path(__file__).parent.parent.parent
-        args.output_dir = str(project_root / "results" / "advanced" / args.model)
+        base_output_dir = project_root / "results" / "advanced" / args.model
+
+        # Prevent overwriting: if folder exists, create versioned folder
+        if base_output_dir.exists():
+            version = 2
+            while True:
+                versioned_dir = project_root / "results" / "advanced" / f"{args.model}_v{version}"
+                if not versioned_dir.exists():
+                    print(f"Output directory {base_output_dir} already exists.")
+                    print(f"Saving to new directory: {versioned_dir}")
+                    args.output_dir = str(versioned_dir)
+                    break
+                version += 1
+        else:
+            args.output_dir = str(base_output_dir)
 
     # Configuration
     config = {

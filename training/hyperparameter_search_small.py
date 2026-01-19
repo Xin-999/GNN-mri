@@ -19,8 +19,8 @@ Usage:
     python training/hyperparameter_search_small.py --model fbnetgen --use_enhanced --n_trials 30
 
 Reports:
-    - Best average r across all folds (most generalizable config)
-    - Absolute best r from any single fold (highest achievable performance)
+    - Best average subject-level r across all folds (most generalizable config)
+    - Absolute best subject-level r from any single fold (highest achievable performance)
     - Saves results to: hyperparameter_search_results_small/
     - Saves best summary to: hyperparameter_search_results_small/best_results_summary/
 """
@@ -28,6 +28,7 @@ Reports:
 import argparse
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
 
 # Add project root to path so we can import modules
@@ -57,7 +58,24 @@ from utils.data_utils import (
     load_graphs_with_normalization,
     create_dataloaders,
     compute_metrics,
+    aggregate_window_predictions,
 )
+
+
+def ensure_unique_output_dir(output_dir: Path) -> Path:
+    output_dir = Path(output_dir)
+    if output_dir.exists():
+        if output_dir.is_dir():
+            if any(output_dir.iterdir()):
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                output_dir = output_dir.with_name(f"{output_dir.name}_{timestamp}")
+                print(f"Output directory not empty, using: {output_dir}")
+        else:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_dir = output_dir.with_name(f"{output_dir.name}_{timestamp}")
+            print(f"Output path exists and is not a directory, using: {output_dir}")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return output_dir
 
 
 def objective(trial, model_name, fold_paths, device, n_epochs=15, use_enhanced=False):
@@ -74,7 +92,7 @@ def objective(trial, model_name, fold_paths, device, n_epochs=15, use_enhanced=F
         use_enhanced: Use enhanced models (default: False)
 
     Returns:
-        validation_metric: Average Pearson correlation (r) across all folds to maximize
+        validation_metric: Average subject-level Pearson r across all folds to maximize
     """
     # Clear GPU cache between trials to reduce fragmentation
     if torch.cuda.is_available():
@@ -227,6 +245,7 @@ def objective(trial, model_name, fold_paths, device, n_epochs=15, use_enhanced=F
                 model.eval()
                 all_preds = []
                 all_targets = []
+                all_subj_ids = []
 
                 with torch.no_grad():
                     for batch in val_loader:
@@ -241,6 +260,8 @@ def objective(trial, model_name, fold_paths, device, n_epochs=15, use_enhanced=F
 
                         all_preds.append(preds.cpu())
                         all_targets.append(batch.y.cpu())
+                        if hasattr(batch, "subject_id"):
+                            all_subj_ids.append(batch.subject_id.cpu())
             except RuntimeError as e:
                 if "out of memory" in str(e).lower():
                     print(f"\n⚠️  Trial {trial.number} Fold {fold_idx+1}/{len(fold_paths)} failed: CUDA OOM")
@@ -255,6 +276,15 @@ def objective(trial, model_name, fold_paths, device, n_epochs=15, use_enhanced=F
 
             val_metrics = compute_metrics(predictions, targets, prefix='')
             val_r = val_metrics['r']
+
+            if all_subj_ids:
+                subject_ids = torch.cat(all_subj_ids).numpy().flatten()
+                if len(subject_ids) == len(predictions):
+                    subj_preds, _ = aggregate_window_predictions(predictions, subject_ids)
+                    subj_targets, _ = aggregate_window_predictions(targets, subject_ids)
+                    subj_metrics = compute_metrics(subj_preds, subj_targets, prefix='subj_')
+                    val_metrics.update(subj_metrics)
+                    val_r = val_metrics.get('subj_r', val_r)
 
             if val_r > best_val_r + 1e-5:
                 best_val_r = val_r
@@ -273,7 +303,8 @@ def objective(trial, model_name, fold_paths, device, n_epochs=15, use_enhanced=F
 
         # Store best validation r for this fold
         fold_val_r_scores.append(best_val_r)
-        print(f"  Fold {fold_idx+1}/{len(fold_paths)}: val_r = {best_val_r:.4f}")
+        metric_label = "subj_r" if "subj_r" in best_val_metrics else "r"
+        print(f"  Fold {fold_idx+1}/{len(fold_paths)}: val_{metric_label} = {best_val_r:.4f}")
 
         # Clear GPU cache after each fold
         if torch.cuda.is_available():
@@ -372,7 +403,7 @@ def main():
     # Create unique output directory based on configuration
     base_output_dir = Path(args.output_dir)
     output_dir = base_output_dir / fold_config_str / f"trials_{args.n_trials}"
-    output_dir.mkdir(parents=True, exist_ok=True)
+    output_dir = ensure_unique_output_dir(output_dir)
 
     print(f"Results will be saved to: {output_dir}\n")
 
@@ -389,7 +420,7 @@ def main():
     print(f"Number of trials: {args.n_trials}")
     print(f"Epochs per trial: {args.n_epochs}")
     print(f"Number of folds: {len(fold_paths)}")
-    print(f"Optimizing for: Average Pearson correlation (r) across all folds\n")
+    print("Optimizing for: Average subject-level Pearson r across all folds\n")
 
     study.optimize(
         lambda trial: objective(trial, args.model, [str(p) for p in fold_paths], args.device, args.n_epochs, args.use_enhanced),
@@ -426,7 +457,7 @@ def main():
     print("Search Results")
     print(f"{'='*60}\n")
 
-    print(f"🏆 BEST AVERAGE r ACROSS FOLDS (Trial #{best_trial.number}):")
+    print(f"🏆 BEST AVERAGE subject-level r ACROSS FOLDS (Trial #{best_trial.number}):")
     print(f"  Avg Pearson r:  {best_trial.user_attrs.get('avg_val_r', best_trial.value):.4f} ± {best_trial.user_attrs.get('std_val_r', 0):.4f}")
     print(f"  Number of folds: {best_trial.user_attrs.get('n_folds', len(fold_paths))}")
 
@@ -436,7 +467,7 @@ def main():
 
     if best_single_fold_info:
         print(f"\n{'='*60}")
-        print(f"⭐ ABSOLUTE BEST r FROM ANY SINGLE FOLD:")
+        print(f"⭐ ABSOLUTE BEST subject-level r FROM ANY SINGLE FOLD:")
         print(f"  Best single fold r: {best_single_fold_info['r_value']:.4f}")
         print(f"  From trial #{best_single_fold_info['trial_number']}")
         print(f"  From fold: {best_single_fold_info['fold_name']} (index {best_single_fold_info['fold_index']})")
@@ -497,7 +528,7 @@ def main():
         'n_trials': args.n_trials,
         'n_folds': len(fold_paths),
         'best_avg_r_trial': {
-            'description': 'Trial with best average r across all folds',
+            'description': 'Trial with best average subject-level r across all folds',
             'trial_number': best_trial.number,
             'avg_r': best_trial.user_attrs.get('avg_val_r', best_trial.value),
             'std_r': best_trial.user_attrs.get('std_val_r', 0),
@@ -505,7 +536,7 @@ def main():
             'fold_r_scores': best_trial.user_attrs.get('fold_val_r_scores', []),
         },
         'absolute_best_single_fold': {
-            'description': 'Absolute highest r value from any single fold across all trials',
+            'description': 'Absolute highest subject-level r value from any single fold across all trials',
             **best_single_fold_info
         } if best_single_fold_info else {},
     }
@@ -529,7 +560,7 @@ def main():
     except ImportError:
         print("Plotly not installed - skipping visualizations")
 
-    print("\nTop 5 trials (by Pearson r):")
+    print("\nTop 5 trials (by subject-level Pearson r):")
     print("="*60)
     trials_df = study.trials_dataframe().sort_values('value', ascending=False).head(5)
     display_df = trials_df[['number', 'value', 'params_hidden_dim', 'params_lr', 'params_dropout']].rename(

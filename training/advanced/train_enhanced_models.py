@@ -229,7 +229,7 @@ def evaluate(model, loader, criterion, device, scaler, model_name=''):
     }
 
 
-def train_fold(model_name, fold_path, config, device):
+def train_fold(model_name, fold_path, config, device, output_dir=None):
     """Train model on a single fold."""
     print(f"\n{'='*70}")
     print(f"Training {model_name.upper()} Enhanced on fold: {fold_path.name}")
@@ -333,10 +333,13 @@ def train_fold(model_name, fold_path, config, device):
             best_epoch = epoch
             patience_counter = 0
 
-            # Save best model (use absolute path from project root)
-            project_root = Path(__file__).parent.parent.parent
-            output_dir = project_root / "results" / "enhanced" / f"{model_name}_enhanced" / fold_path.name
-            output_dir.mkdir(parents=True, exist_ok=True)
+            # Save best model (use provided output_dir or default)
+            if output_dir is None:
+                project_root = Path(__file__).parent.parent.parent
+                fold_output_dir = project_root / "results" / "enhanced" / f"{model_name}_enhanced" / fold_path.name
+            else:
+                fold_output_dir = Path(output_dir) / fold_path.name
+            fold_output_dir.mkdir(parents=True, exist_ok=True)
 
             torch.save({
                 'epoch': epoch,
@@ -344,7 +347,7 @@ def train_fold(model_name, fold_path, config, device):
                 'optimizer_state_dict': optimizer.state_dict(),
                 'config': config,
                 'scaler': scaler,
-            }, output_dir / f"{model_name}_best.pt")
+            }, fold_output_dir / f"{model_name}_best.pt")
         else:
             patience_counter += 1
 
@@ -356,7 +359,7 @@ def train_fold(model_name, fold_path, config, device):
     print(f"\nBest epoch: {best_epoch}")
 
     # Load best model for testing
-    checkpoint = torch.load(output_dir / f"{model_name}_best.pt", weights_only=False)
+    checkpoint = torch.load(fold_output_dir / f"{model_name}_best.pt", weights_only=False)
     model.load_state_dict(checkpoint['model_state_dict'])
 
     # Test evaluation
@@ -457,13 +460,13 @@ def train_fold(model_name, fold_path, config, device):
     }
 
     # Save per-fold summary
-    with open(output_dir / f"{model_name}_summary.json", 'w') as f:
+    with open(fold_output_dir / f"{model_name}_summary.json", 'w') as f:
         json.dump(results, f, indent=2)
 
     return results
 
 
-def aggregate_results(model_name, all_results):
+def aggregate_results(model_name, all_results, output_dir=None):
     """Aggregate results across all folds."""
     print(f"\n{'='*70}")
     print(f"Aggregating results for {model_name.upper()} Enhanced")
@@ -543,12 +546,15 @@ def aggregate_results(model_name, all_results):
         'per_fold_detailed': all_results,
     }
 
-    # Save aggregate summary (use absolute path from project root)
-    project_root = Path(__file__).parent.parent.parent
-    output_dir = project_root / "results" / "enhanced" / f"{model_name}_enhanced"
-    output_dir.mkdir(parents=True, exist_ok=True)
+    # Save aggregate summary (use provided output_dir or default)
+    if output_dir is None:
+        project_root = Path(__file__).parent.parent.parent
+        agg_output_dir = project_root / "results" / "enhanced" / f"{model_name}_enhanced"
+    else:
+        agg_output_dir = Path(output_dir)
+    agg_output_dir.mkdir(parents=True, exist_ok=True)
 
-    with open(output_dir / f"{model_name}_aggregate_summary.json", 'w') as f:
+    with open(agg_output_dir / f"{model_name}_aggregate_summary.json", 'w') as f:
         json.dump(aggregate_summary, f, indent=2)
 
     # Print summary
@@ -562,7 +568,7 @@ def aggregate_results(model_name, all_results):
         for metric, values in subject_agg.items():
             print(f"    {metric}: {values['mean']:.4f} ± {values['std']:.4f}")
 
-    print(f"\nResults saved to: {output_dir / f'{model_name}_aggregate_summary.json'}")
+    print(f"\nResults saved to: {agg_output_dir / f'{model_name}_aggregate_summary.json'}")
 
     return aggregate_summary
 
@@ -677,11 +683,30 @@ def main():
 
     print(f"\nTraining {args.model.upper()} Enhanced on {len(fold_dirs)} folds")
 
+    # Determine output directory (with versioning to prevent overwriting)
+    project_root = Path(__file__).parent.parent.parent
+    base_output_dir = project_root / "results" / "enhanced" / f"{args.model}_enhanced"
+
+    if base_output_dir.exists():
+        version = 2
+        while True:
+            versioned_dir = project_root / "results" / "enhanced" / f"{args.model}_enhanced_v{version}"
+            if not versioned_dir.exists():
+                print(f"Output directory {base_output_dir} already exists.")
+                print(f"Saving to new directory: {versioned_dir}")
+                output_dir = versioned_dir
+                break
+            version += 1
+    else:
+        output_dir = base_output_dir
+
+    print(f"Results will be saved to: {output_dir}")
+
     # Train on all folds
     all_results = []
     for fold_dir in fold_dirs:
         try:
-            result = train_fold(args.model, fold_dir, config, device)
+            result = train_fold(args.model, fold_dir, config, device, output_dir=output_dir)
             all_results.append(result)
         except Exception as e:
             print(f"Error training on {fold_dir}: {e}")
@@ -691,7 +716,7 @@ def main():
 
     # Aggregate results
     if all_results:
-        aggregate_results(args.model, all_results)
+        aggregate_results(args.model, all_results, output_dir=output_dir)
     else:
         print("No successful training runs!")
 

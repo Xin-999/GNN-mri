@@ -25,6 +25,7 @@ Searches over:
 import argparse
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
 
 # Add project root to path so we can import modules
@@ -54,7 +55,24 @@ from utils.data_utils import (
     load_graphs_with_normalization,
     create_dataloaders,
     compute_metrics,
+    aggregate_window_predictions,
 )
+
+
+def ensure_unique_output_dir(output_dir: Path) -> Path:
+    output_dir = Path(output_dir)
+    if output_dir.exists():
+        if output_dir.is_dir():
+            if any(output_dir.iterdir()):
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                output_dir = output_dir.with_name(f"{output_dir.name}_{timestamp}")
+                print(f"Output directory not empty, using: {output_dir}")
+        else:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_dir = output_dir.with_name(f"{output_dir.name}_{timestamp}")
+            print(f"Output path exists and is not a directory, using: {output_dir}")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return output_dir
 
 
 def objective(trial, model_name, fold_path, device, n_epochs=30, use_enhanced=False):
@@ -70,7 +88,7 @@ def objective(trial, model_name, fold_path, device, n_epochs=30, use_enhanced=Fa
         use_enhanced: Use enhanced models (default: False)
 
     Returns:
-        validation_metric: Pearson correlation (r) to maximize
+        validation_metric: Subject-level Pearson r (aggregated by subject) when available
     """
     # Set seed for this trial (based on trial number for reproducibility)
     import random
@@ -212,6 +230,7 @@ def objective(trial, model_name, fold_path, device, n_epochs=30, use_enhanced=Fa
             model.eval()
             all_preds = []
             all_targets = []
+            all_subj_ids = []
 
             with torch.no_grad():
                 for batch in val_loader:
@@ -219,6 +238,8 @@ def objective(trial, model_name, fold_path, device, n_epochs=30, use_enhanced=Fa
                     preds = model(batch)
                     all_preds.append(preds.cpu())
                     all_targets.append(batch.y.cpu())
+                    if hasattr(batch, "subject_id"):
+                        all_subj_ids.append(batch.subject_id.cpu())
         except RuntimeError as e:
             # Handle CUDA out of memory
             if "out of memory" in str(e).lower():
@@ -235,6 +256,15 @@ def objective(trial, model_name, fold_path, device, n_epochs=30, use_enhanced=Fa
 
         val_metrics = compute_metrics(predictions, targets, prefix='')
         val_r = val_metrics['r']
+
+        if all_subj_ids:
+            subject_ids = torch.cat(all_subj_ids).numpy().flatten()
+            if len(subject_ids) == len(predictions):
+                subj_preds, _ = aggregate_window_predictions(predictions, subject_ids)
+                subj_targets, _ = aggregate_window_predictions(targets, subject_ids)
+                subj_metrics = compute_metrics(subj_preds, subj_targets, prefix='subj_')
+                val_metrics.update(subj_metrics)
+                val_r = val_metrics.get('subj_r', val_r)
 
         # Early stopping (maximize correlation)
         if val_r > best_val_r + 1e-5:
@@ -256,10 +286,14 @@ def objective(trial, model_name, fold_path, device, n_epochs=30, use_enhanced=Fa
 
     # Store all metrics as user attributes
     trial.set_user_attr('best_val_r', best_val_r)
-    trial.set_user_attr('best_val_mse', best_val_metrics.get('mse', float('nan')))
-    trial.set_user_attr('best_val_mae', best_val_metrics.get('mae', float('nan')))
-    trial.set_user_attr('best_val_r2', best_val_metrics.get('r2', float('nan')))
-    trial.set_user_attr('best_val_p_value', best_val_metrics.get('p_value', float('nan')))
+    trial.set_user_attr('best_val_mse', best_val_metrics.get('subj_mse', best_val_metrics.get('mse', float('nan'))))
+    trial.set_user_attr('best_val_mae', best_val_metrics.get('subj_mae', best_val_metrics.get('mae', float('nan'))))
+    trial.set_user_attr('best_val_r2', best_val_metrics.get('subj_r2', best_val_metrics.get('r2', float('nan'))))
+    trial.set_user_attr('best_val_p_value', best_val_metrics.get('subj_p_value', best_val_metrics.get('p_value', float('nan'))))
+    trial.set_user_attr('best_val_win_r', best_val_metrics.get('r', float('nan')))
+    trial.set_user_attr('best_val_win_mse', best_val_metrics.get('mse', float('nan')))
+    trial.set_user_attr('best_val_subj_r', best_val_metrics.get('subj_r', float('nan')))
+    trial.set_user_attr('best_val_subj_mse', best_val_metrics.get('subj_mse', float('nan')))
 
     return best_val_r
 
@@ -316,8 +350,7 @@ def main():
     print(f"Using fold: {fold_path.name}\n")
 
     # Create output directory
-    output_dir = Path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    output_dir = ensure_unique_output_dir(Path(args.output_dir))
 
     # Create Optuna study
     study_name = args.study_name or f"{args.model}_search"
@@ -333,7 +366,7 @@ def main():
     print(f"Starting hyperparameter search for {args.model.upper()} ({model_type})")
     print(f"Number of trials: {args.n_trials}")
     print(f"Epochs per trial: {args.n_epochs}")
-    print(f"Optimizing for: Pearson correlation (r)\n")
+    print("Optimizing for: Subject-level Pearson r (aggregated by subject)\n")
 
     # Run optimization
     study.optimize(
@@ -351,7 +384,7 @@ def main():
     # Get best trial metrics
     best_trial = study.best_trial
     print(f"Best trial #{best_trial.number}")
-    print(f"\nValidation Metrics:")
+    print("\nValidation Metrics (subject-level if available):")
     print(f"  Pearson r:  {best_trial.user_attrs.get('best_val_r', best_trial.value):.4f}")
     print(f"  MSE:        {best_trial.user_attrs.get('best_val_mse', float('nan')):.4f}")
     print(f"  MAE:        {best_trial.user_attrs.get('best_val_mae', float('nan')):.4f}")
