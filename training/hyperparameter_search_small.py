@@ -78,6 +78,35 @@ def ensure_unique_output_dir(output_dir: Path) -> Path:
     return output_dir
 
 
+def write_best_so_far(output_dir: Path, model_name: str, study) -> None:
+    try:
+        best_trial = study.best_trial
+    except ValueError:
+        return
+
+    payload = {
+        "timestamp": datetime.now().isoformat(),
+        "study_name": study.study_name,
+        "n_trials": len(study.trials),
+        "best_trial": {
+            "number": best_trial.number,
+            "value": best_trial.value,
+            "params": best_trial.params,
+            "state": str(best_trial.state),
+            "metrics": {
+                "avg_r": best_trial.user_attrs.get("avg_val_r", best_trial.value),
+                "std_r": best_trial.user_attrs.get("std_val_r"),
+                "n_folds": best_trial.user_attrs.get("n_folds"),
+                "fold_r_scores": best_trial.user_attrs.get("fold_val_r_scores", []),
+            },
+        },
+    }
+
+    best_path = output_dir / f"{model_name}_best_so_far.json"
+    with open(best_path, "w") as f:
+        json.dump(payload, f, indent=2)
+
+
 def objective(trial, model_name, fold_paths, device, n_epochs=15, use_enhanced=False):
     """
     Objective function for compact Optuna optimization.
@@ -422,11 +451,15 @@ def main():
     print(f"Number of folds: {len(fold_paths)}")
     print("Optimizing for: Average subject-level Pearson r across all folds\n")
 
+    def on_trial_complete(study, trial):
+        write_best_so_far(output_dir, args.model, study)
+
     study.optimize(
         lambda trial: objective(trial, args.model, [str(p) for p in fold_paths], args.device, args.n_epochs, args.use_enhanced),
         n_trials=args.n_trials,
         n_jobs=args.n_jobs,
         show_progress_bar=True,
+        callbacks=[on_trial_complete],
     )
 
     # Find absolute best r from any fold in any trial

@@ -75,6 +75,42 @@ def ensure_unique_output_dir(output_dir: Path) -> Path:
     return output_dir
 
 
+def write_best_so_far(output_dir: Path, model_name: str, study) -> None:
+    try:
+        best_trial = study.best_trial
+    except ValueError:
+        return
+
+    best_metrics = {
+        "r": best_trial.user_attrs.get("best_val_r", best_trial.value),
+        "mse": best_trial.user_attrs.get("best_val_mse"),
+        "mae": best_trial.user_attrs.get("best_val_mae"),
+        "r2": best_trial.user_attrs.get("best_val_r2"),
+        "p_value": best_trial.user_attrs.get("best_val_p_value"),
+        "win_r": best_trial.user_attrs.get("best_val_win_r"),
+        "win_mse": best_trial.user_attrs.get("best_val_win_mse"),
+        "subj_r": best_trial.user_attrs.get("best_val_subj_r"),
+        "subj_mse": best_trial.user_attrs.get("best_val_subj_mse"),
+    }
+
+    payload = {
+        "timestamp": datetime.now().isoformat(),
+        "study_name": study.study_name,
+        "n_trials": len(study.trials),
+        "best_trial": {
+            "number": best_trial.number,
+            "value": best_trial.value,
+            "params": best_trial.params,
+            "state": str(best_trial.state),
+            "metrics": best_metrics,
+        },
+    }
+
+    best_path = output_dir / f"{model_name}_best_so_far.json"
+    with open(best_path, "w") as f:
+        json.dump(payload, f, indent=2)
+
+
 def objective(trial, model_name, fold_path, device, n_epochs=30, use_enhanced=False):
     """
     Objective function for Optuna optimization.
@@ -369,11 +405,15 @@ def main():
     print("Optimizing for: Subject-level Pearson r (aggregated by subject)\n")
 
     # Run optimization
+    def on_trial_complete(study, trial):
+        write_best_so_far(output_dir, args.model, study)
+
     study.optimize(
         lambda trial: objective(trial, args.model, str(fold_path), args.device, args.n_epochs, args.use_enhanced),
         n_trials=args.n_trials,
         n_jobs=args.n_jobs,
         show_progress_bar=True,
+        callbacks=[on_trial_complete],
     )
 
     # Results

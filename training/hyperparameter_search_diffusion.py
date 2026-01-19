@@ -98,6 +98,38 @@ def ensure_unique_output_dir(output_dir: Path) -> Path:
     return output_dir
 
 
+def write_best_so_far(output_dir: Path, model_name: str, objective: str, mse_weight: float, study) -> None:
+    try:
+        best_trial = study.best_trial
+    except ValueError:
+        return
+
+    payload = {
+        "timestamp": datetime.now().isoformat(),
+        "study_name": study.study_name,
+        "objective": objective,
+        "mse_weight": mse_weight,
+        "n_trials": len(study.trials),
+        "best_trial": {
+            "number": best_trial.number,
+            "value": best_trial.value,
+            "params": best_trial.params,
+            "state": str(best_trial.state),
+            "metrics": {
+                "avg_val_r": best_trial.user_attrs.get("avg_val_r"),
+                "std_val_r": best_trial.user_attrs.get("std_val_r"),
+                "avg_val_mse": best_trial.user_attrs.get("avg_val_mse"),
+                "std_val_mse": best_trial.user_attrs.get("std_val_mse"),
+                "n_folds": best_trial.user_attrs.get("n_folds"),
+            },
+        },
+    }
+
+    best_path = output_dir / f"{model_name}_best_so_far.json"
+    with open(best_path, "w") as f:
+        json.dump(payload, f, indent=2)
+
+
 def set_seed(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
@@ -457,6 +489,9 @@ def main() -> None:
         sampler=optuna.samplers.TPESampler(seed=42),
     )
 
+    def on_trial_complete(study, trial):
+        write_best_so_far(output_dir, args.model, args.objective, args.mse_weight, study)
+
     study.optimize(
         lambda trial: objective(
             trial,
@@ -472,6 +507,7 @@ def main() -> None:
         n_trials=args.n_trials,
         n_jobs=args.n_jobs,
         show_progress_bar=True,
+        callbacks=[on_trial_complete],
     )
 
     best_objective_trial = study.best_trial
