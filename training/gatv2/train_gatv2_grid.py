@@ -24,6 +24,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import time
+from datetime import datetime
 
 from torch_geometric.loader import DataLoader
 from torch_geometric.nn import GATv2Conv, GlobalAttention, global_mean_pool
@@ -39,7 +40,24 @@ OUTPUT_DIR = Path("../../results/gatv2/grid")
 if not OUTPUT_DIR.parent.exists():
     # Fallback: try from project root
     OUTPUT_DIR = Path("results/gatv2/grid")
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def ensure_unique_output_dir(output_dir: Path) -> Path:
+    output_dir = Path(output_dir)
+    if output_dir.exists():
+        if output_dir.is_dir():
+            if any(output_dir.iterdir()):
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                output_dir = output_dir.with_name(f"{output_dir.name}_{timestamp}")
+                print(f"Output directory not empty, using: {output_dir}")
+        else:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_dir = output_dir.with_name(f"{output_dir.name}_{timestamp}")
+            print(f"Output path exists and is not a directory, using: {output_dir}")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return output_dir
+
+
 
 SEED = 42
 BATCH_SIZE = 32
@@ -289,6 +307,9 @@ def eval_epoch(model, loader, device):
 
 def main():
     set_seed(SEED)
+
+    global OUTPUT_DIR
+    OUTPUT_DIR = ensure_unique_output_dir(OUTPUT_DIR)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("Using device:", device)

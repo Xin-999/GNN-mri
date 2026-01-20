@@ -54,6 +54,22 @@ class NumpyEncoder(json.JSONEncoder):
         return super(NumpyEncoder, self).default(obj)
 
 
+def ensure_unique_output_dir(output_dir: Path) -> Path:
+    output_dir = Path(output_dir)
+    if output_dir.exists():
+        if output_dir.is_dir():
+            if any(output_dir.iterdir()):
+                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                output_dir = output_dir.with_name(f"{output_dir.name}_{timestamp}")
+                print(f"Output directory not empty, using: {output_dir}")
+        else:
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_dir = output_dir.with_name(f"{output_dir.name}_{timestamp}")
+            print(f"Output path exists and is not a directory, using: {output_dir}")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return output_dir
+
+
 # ----------------------------
 # 1. Config
 # ----------------------------
@@ -63,7 +79,6 @@ OUTPUT_DIR = Path("../../results/gatv2/improved")
 if not OUTPUT_DIR.exists():
     # Fallback if running from project root
     OUTPUT_DIR = Path("results/gatv2/improved")
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 SEED = 42
 BATCH_SIZE = 32
@@ -744,6 +759,7 @@ def run_grid_search(device):
     grid_results_dir = Path("../../results/gatv2/grid")
     if not grid_results_dir.exists():
         grid_results_dir = Path("results/gatv2/grid")
+    grid_results_dir = ensure_unique_output_dir(grid_results_dir)
 
     completed_configs = 0
     if grid_results_dir.exists():
@@ -797,9 +813,7 @@ def run_grid_search(device):
 
         # Set output directory for this config
         global OUTPUT_DIR
-        OUTPUT_DIR = Path(f"../../results/gatv2/grid/{config_name}")
-        if not OUTPUT_DIR.exists():
-            OUTPUT_DIR = Path(f"results/gatv2/grid/{config_name}")
+        OUTPUT_DIR = grid_results_dir / config_name
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
         # Check if this config is already completed
@@ -883,8 +897,7 @@ def run_grid_search(device):
         'all_results': all_config_results,
     }
 
-    grid_summary_path = Path("results/gatv2/grid_search_summary.json")
-    grid_summary_path.parent.mkdir(parents=True, exist_ok=True)
+    grid_summary_path = grid_results_dir / "grid_search_summary.json"
     with open(grid_summary_path, 'w') as f:
         json.dump(grid_summary, f, indent=2, cls=NumpyEncoder)
 
@@ -929,6 +942,9 @@ def main():
     if args.grid_search:
         run_grid_search(device)
         return
+
+    global OUTPUT_DIR
+    OUTPUT_DIR = ensure_unique_output_dir(OUTPUT_DIR)
 
     config = {
         'epochs': args.epochs,

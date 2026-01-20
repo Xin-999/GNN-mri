@@ -13,6 +13,7 @@ Usage:
 
 import argparse
 import sys
+from datetime import datetime
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -36,6 +37,22 @@ try:
 except Exception as e:
     print(f"Warning: Could not import GATv2Regressor: {e}")
     GATv2Regressor = None
+
+
+def ensure_unique_output_dir(output_dir: Path) -> Path:
+    output_dir = Path(output_dir)
+    if output_dir.exists():
+        if output_dir.is_dir():
+            if any(output_dir.iterdir()):
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                output_dir = output_dir.with_name(f"{output_dir.name}_{timestamp}")
+                print(f"Output directory not empty, using: {output_dir}")
+        else:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_dir = output_dir.with_name(f"{output_dir.name}_{timestamp}")
+            print(f"Output path exists and is not a directory, using: {output_dir}")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return output_dir
 
 
 def load_subject_ids_and_scores(csv_path='data/ListSort_AgeAdj.csv'):
@@ -524,6 +541,8 @@ def main():
 
     print(f"Using device: {device}")
 
+    output_dir = ensure_unique_output_dir(Path(args.output_dir))
+
     # Get fold directories
     model_dir = Path(args.model_dir)
     if not model_dir.exists():
@@ -553,7 +572,7 @@ def main():
             all_results[fold_name] = results
 
             # Save this fold's results immediately
-            save_fold_to_excel(fold_name, results, args.output_dir)
+            save_fold_to_excel(fold_name, results, output_dir)
 
         except Exception as e:
             print(f"\nError predicting fold {fold_name}: {e}")
@@ -565,11 +584,11 @@ def main():
     # Save aggregate summary
     if all_results:
         model_dir_name = Path(args.model_dir).name
-        save_aggregate_summary(all_results, args.output_dir, model_dir_name)
+        save_aggregate_summary(all_results, output_dir, model_dir_name)
 
         print(f"\n{'='*70}")
         print(f"Predictions complete!")
-        print(f"Results saved to: {args.output_dir}/")
+        print(f"Results saved to: {output_dir}/")
         print(f"{'='*70}")
     else:
         print("\nNo successful predictions!")

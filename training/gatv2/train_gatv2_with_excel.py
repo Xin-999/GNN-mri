@@ -21,6 +21,7 @@ import torch.nn as nn
 import torch.optim as optim
 import time
 import pandas as pd  # <-- NEW
+from datetime import datetime
 
 from torch_geometric.loader import DataLoader
 from torch_geometric.nn import GATv2Conv, GlobalAttention, global_mean_pool
@@ -36,13 +37,28 @@ OUTPUT_DIR = Path("../../results/gatv2/basic")
 if not OUTPUT_DIR.parent.exists():
     # Fallback: try from project root
     OUTPUT_DIR = Path("results/gatv2/basic")
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def ensure_unique_output_dir(output_dir: Path) -> Path:
+    output_dir = Path(output_dir)
+    if output_dir.exists():
+        if output_dir.is_dir():
+            if any(output_dir.iterdir()):
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                output_dir = output_dir.with_name(f"{output_dir.name}_{timestamp}")
+                print(f"Output directory not empty, using: {output_dir}")
+        else:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_dir = output_dir.with_name(f"{output_dir.name}_{timestamp}")
+            print(f"Output path exists and is not a directory, using: {output_dir}")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return output_dir
+
 
 PREDICTION_DIR = Path("../../results/predictions/gatv2")
 if not PREDICTION_DIR.parent.exists():
     # Fallback: try from project root
     PREDICTION_DIR = Path("results/predictions/gatv2")
-PREDICTION_DIR.mkdir(parents=True, exist_ok=True)
 
 SEED = 42
 BATCH_SIZE = 32
@@ -376,6 +392,11 @@ def save_split_predictions(
 
 def main():
     set_seed(SEED)
+
+    global OUTPUT_DIR
+    global PREDICTION_DIR
+    OUTPUT_DIR = ensure_unique_output_dir(OUTPUT_DIR)
+    PREDICTION_DIR = ensure_unique_output_dir(PREDICTION_DIR)
 
     fold_dir = Path("../../data/folds_data")
     if not fold_dir.exists():

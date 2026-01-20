@@ -36,6 +36,7 @@ import os
 import json
 from pathlib import Path
 import time
+from datetime import datetime
 
 
 def run_command(cmd, description, cwd=None):
@@ -73,6 +74,22 @@ def run_command(cmd, description, cwd=None):
         print(f"\n✗ {description} failed with error:")
         print(e)
         return False
+
+
+def ensure_unique_output_dir(output_dir: Path) -> Path:
+    output_dir = Path(output_dir)
+    if output_dir.exists():
+        if output_dir.is_dir():
+            if any(output_dir.iterdir()):
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                output_dir = output_dir.with_name(f"{output_dir.name}_{timestamp}")
+                print(f"Output directory not empty, using: {output_dir}")
+        else:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_dir = output_dir.with_name(f"{output_dir.name}_{timestamp}")
+            print(f"Output path exists and is not a directory, using: {output_dir}")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return output_dir
 
 
 def generate_comparison_report(output_dir, project_root, selected_models=None):
@@ -635,8 +652,7 @@ def main():
         fold_arg = []
 
     # Create output directory (relative to project root)
-    output_path = project_root / args.output_dir
-    output_path.mkdir(parents=True, exist_ok=True)
+    output_path = ensure_unique_output_dir(project_root / args.output_dir)
 
     # Handle compare_base_enhanced mode
     if args.compare_base_enhanced:
@@ -790,7 +806,7 @@ def main():
             print(f"  - results/advanced/braingnn/")
             print(f"  - results/advanced/fbnetgen/")
         print(f"  - results/ensemble/")
-        print(f"  - {args.output_dir}/comparison_report.txt")
+        print(f"  - {output_path / 'comparison_report.txt'}")
     else:
         print(f"\n⚠️  Some steps failed. Check logs above.")
 
