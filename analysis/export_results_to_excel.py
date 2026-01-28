@@ -3,7 +3,7 @@
 Export per-fold *_predictions.json and *_summary.json to Excel.
 
 Creates:
-  - One Excel file per fold with sheets: "predictions" and "summary"
+  - One Excel file per fold with sheets: "predictions", "subjects", and "summary"
   - An aggregate summary Excel with per-fold metrics + mean/std rows
 
 Usage:
@@ -116,6 +116,41 @@ def load_json(path: Path):
 def safe_sheet_name(name: str) -> str:
     name = name.replace("/", "_").replace("\\", "_")
     return name[:31]
+
+
+def aggregate_subjects(preds_df: pd.DataFrame) -> pd.DataFrame:
+    if preds_df.empty:
+        return preds_df
+
+    if "subject_index" in preds_df.columns:
+        key = "subject_index"
+    elif "subject_id_local" in preds_df.columns:
+        key = "subject_id_local"
+    else:
+        key = "subject_id"
+
+    agg_map = {}
+    for col in ["prediction", "target", "prediction_normalized", "target_normalized", "error"]:
+        if col in preds_df.columns:
+            agg_map[col] = "mean"
+
+    grouped = preds_df.groupby(key, dropna=False)
+    agg_df = grouped.agg(agg_map).reset_index()
+    agg_df["n_windows"] = grouped.size().values
+
+    for col in ["subject_id", "subject_index", "subject_id_local"]:
+        if col in preds_df.columns and col not in agg_df.columns:
+            agg_df[col] = grouped[col].first().values
+
+    ordered = []
+    for col in ["subject_id", "subject_index", "subject_id_local", "n_windows"]:
+        if col in agg_df.columns:
+            ordered.append(col)
+    for col in ["prediction", "target", "prediction_normalized", "target_normalized", "error"]:
+        if col in agg_df.columns:
+            ordered.append(col)
+
+    return agg_df[ordered]
 
 
 def load_subject_list(csv_path: Path) -> Optional[List]:
@@ -255,12 +290,15 @@ def main() -> None:
             preds_df = map_subject_ids(preds_df, fold_name, folds_dir, subject_list)
         summary_df = pd.DataFrame(flatten_summary(summary))
 
+        subjects_df = aggregate_subjects(preds_df)
+
         if args.single_workbook:
-            combined_results.append((fold_name, preds_df, summary_df))
+            combined_results.append((fold_name, preds_df, subjects_df, summary_df))
         else:
             out_path = output_dir / f"{fold_name}_results.xlsx"
             with pd.ExcelWriter(out_path, engine="openpyxl") as writer:
                 preds_df.to_excel(writer, sheet_name="predictions", index=False)
+                subjects_df.to_excel(writer, sheet_name="subjects", index=False)
                 summary_df.to_excel(writer, sheet_name="summary", index=False)
 
         metrics = extract_metrics(summary)
@@ -291,10 +329,12 @@ def main() -> None:
     if args.single_workbook and combined_results:
         combined_path = output_dir / "all_folds_results.xlsx"
         with pd.ExcelWriter(combined_path, engine="openpyxl") as writer:
-            for fold_name, preds_df, summary_df in combined_results:
+            for fold_name, preds_df, subjects_df, summary_df in combined_results:
                 preds_sheet = safe_sheet_name(f"{fold_name}_preds")
+                subjects_sheet = safe_sheet_name(f"{fold_name}_subjects")
                 summary_sheet = safe_sheet_name(f"{fold_name}_summary")
                 preds_df.to_excel(writer, sheet_name=preds_sheet, index=False)
+                subjects_df.to_excel(writer, sheet_name=subjects_sheet, index=False)
                 summary_df.to_excel(writer, sheet_name=summary_sheet, index=False)
             if aggregate_rows:
                 agg_df.to_excel(writer, sheet_name="aggregate_summary", index=False)
