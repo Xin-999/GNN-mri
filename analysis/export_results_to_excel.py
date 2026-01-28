@@ -187,7 +187,8 @@ def map_subject_ids(
     if "subject_id" not in preds_df.columns:
         return preds_df
 
-    fold_path = folds_dir / f"{fold_name}.pkl"
+    fold_base = fold_name[:-4] if fold_name.endswith(".pkl") else fold_name
+    fold_path = folds_dir / f"{fold_base}.pkl"
     test_indices = load_fold_test_indices(fold_path)
     if not test_indices:
         return preds_df
