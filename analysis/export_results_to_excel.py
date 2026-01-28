@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
+import torch
 
 
 def find_result_files(folder: Path) -> Tuple[Optional[Path], Optional[Path]]:
@@ -110,6 +111,65 @@ def safe_sheet_name(name: str) -> str:
     return name[:31]
 
 
+def load_subject_list(csv_path: Path) -> Optional[List]:
+    if not csv_path.exists():
+        return None
+    try:
+        df = pd.read_csv(csv_path)
+    except Exception:
+        return None
+    if "Subject" not in df.columns:
+        return None
+    return df["Subject"].tolist()
+
+
+def load_fold_test_indices(fold_path: Path) -> Optional[List[int]]:
+    if not fold_path.exists():
+        return None
+    try:
+        fold_dict = torch.load(fold_path, map_location="cpu", weights_only=False)
+    except Exception:
+        return None
+    test_indices = fold_dict.get("test_indices")
+    if test_indices is None:
+        return None
+    return list(test_indices)
+
+
+def map_subject_ids(
+    preds_df: pd.DataFrame,
+    fold_name: str,
+    folds_dir: Path,
+    subject_list: Optional[List],
+) -> pd.DataFrame:
+    if "subject_id" not in preds_df.columns:
+        return preds_df
+
+    fold_path = folds_dir / f"{fold_name}.pkl"
+    test_indices = load_fold_test_indices(fold_path)
+    if not test_indices:
+        return preds_df
+
+    local_ids = preds_df["subject_id"].astype(int).tolist()
+    global_idx = []
+    real_ids = []
+    for local_id in local_ids:
+        if 0 <= local_id < len(test_indices):
+            gidx = test_indices[local_id]
+        else:
+            gidx = None
+        global_idx.append(gidx)
+        if subject_list is not None and gidx is not None and 0 <= gidx < len(subject_list):
+            real_ids.append(subject_list[gidx])
+        else:
+            real_ids.append(gidx)
+
+    preds_df = preds_df.rename(columns={"subject_id": "subject_id_local"})
+    preds_df.insert(0, "subject_id", real_ids)
+    preds_df.insert(1, "subject_index", global_idx)
+    return preds_df
+
+
 def ensure_unique_dir(base_dir: Path) -> Path:
     base_dir = Path(base_dir)
     if not base_dir.exists():
@@ -137,6 +197,12 @@ def main() -> None:
                         help="Directory to save Excel files (default: results_root/excel_exports)")
     parser.add_argument("--single_workbook", action="store_true",
                         help="Write one Excel file with all folds as tabs")
+    parser.add_argument("--folds_dir", type=str, default="data/folds_data",
+                        help="Directory containing fold .pkl files (for subject ID mapping)")
+    parser.add_argument("--csv_path", type=str, default="data/ListSort_AgeAdj.csv",
+                        help="CSV with Subject IDs for mapping (column: Subject)")
+    parser.add_argument("--no_map_subject_ids", action="store_true",
+                        help="Disable mapping local subject_id to real Subject IDs")
     args = parser.parse_args()
 
     results_root = Path(args.results_root)
@@ -159,6 +225,10 @@ def main() -> None:
 
     aggregate_rows = []
     combined_results = []
+    folds_dir = Path(args.folds_dir)
+    subject_list = None
+    if not args.no_map_subject_ids:
+        subject_list = load_subject_list(Path(args.csv_path))
 
     for fold_dir in fold_dirs:
         summary_path, preds_path = find_result_files(fold_dir)
@@ -174,6 +244,8 @@ def main() -> None:
             fold_name = fold_dir.name
 
         preds_df = pd.DataFrame(predictions)
+        if not args.no_map_subject_ids:
+            preds_df = map_subject_ids(preds_df, fold_name, folds_dir, subject_list)
         summary_df = pd.DataFrame(flatten_summary(summary))
 
         if args.single_workbook:
