@@ -9,7 +9,14 @@ Creates:
 Usage:
   python analysis/export_results_to_excel.py --results_root "C:\\path\\to\\results\\advanced\\fbnetgen_v2"
   python analysis/export_results_to_excel.py --results_root "C:\\path\\to\\results\\advanced\\fbnetgen_v2" --output_dir "C:\\path\\to\\excel"
-"""
+
+  python analysis/export_results_to_excel.py \
+  --results_root "C:\Users\UltimateGirl\Documents\Qiao Xin\FIT3161 FYP\GNN-mri\results\advanced\fbnetgen_v2" \
+  --single_workbook \
+  --folds_dir "C:\Users\UltimateGirl\Documents\Qiao Xin\FIT3161 FYP\GNN-mri\data\folds_data" \
+  --csv_path "C:\Users\UltimateGirl\Documents\Qiao Xin\FIT3161 FYP\GNN-mri\data\ListSort_AgeAdj.csv"
+
+  """
 
 import argparse
 import json
