@@ -36,6 +36,8 @@ The scripts automatically detect your working directory and find data/save resul
   - `train_enhanced_models.py` - Enhanced versions with extra techniques
   - `train_ensemble.py` - Ensemble multiple models
 - `other/` - Experimental models (GIN, etc.)
+- `snag/` - SNAG architecture search (GATv2)
+  - `train_snag_gatv2.py` - SNAG search entrypoint
 
 ## 🎯 Quick Start
 
@@ -47,6 +49,11 @@ python training/gatv2/train_gatv2_improved.py --device cuda --epochs 100 --hidde
 ### Advanced Models
 ```bash
 python training/advanced/train_enhanced_models.py --model braingt --epochs 100
+```
+
+### SNAG GATv2 Search
+```bash
+python training/snag/train_snag_gatv2.py --device cuda --train_epochs 20
 ```
 
 ## 📊 Data and Results Locations
@@ -77,5 +84,6 @@ Results are automatically saved to:
 **Other Results:**
 - `../../results/ensemble/` - Ensemble model results
 - `../../results/predictions/` - Prediction outputs
+- `../../results/snag_gatv2/` - SNAG GATv2 search outputs
 
 All paths use `../../` prefix when run from subdirectories, with automatic fallback to relative paths from project root.

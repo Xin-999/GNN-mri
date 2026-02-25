@@ -593,13 +593,32 @@ def main():
     except ImportError:
         print("Plotly not installed - skipping visualizations")
 
-    print("\nTop 5 trials (by subject-level Pearson r):")
-    print("="*60)
-    trials_df = study.trials_dataframe().sort_values('value', ascending=False).head(5)
-    display_df = trials_df[['number', 'value', 'params_hidden_dim', 'params_lr', 'params_dropout']].rename(
-        columns={'value': 'pearson_r'}
-    )
-    print(display_df)
+    trials_df = study.trials_dataframe()
+    trials_df["state"] = trials_df["state"].astype(str)
+    completed_df = trials_df[trials_df["state"].str.contains("COMPLETE")].copy()
+    pruned_df = trials_df[trials_df["state"].str.contains("PRUNED")].copy()
+
+    print("\nTop 5 trials (COMPLETE only, by subject-level Pearson r):")
+    print("=" * 60)
+    if completed_df.empty:
+        print("No completed trials.")
+    else:
+        completed_top = completed_df.sort_values('value', ascending=False).head(5)
+        display_df = completed_top[['number', 'value', 'params_hidden_dim', 'params_lr', 'params_dropout']].rename(
+            columns={'value': 'pearson_r'}
+        )
+        print(display_df)
+
+    print("\nTop 5 trials (PRUNED, by last reported value):")
+    print("=" * 60)
+    if pruned_df.empty:
+        print("No pruned trials.")
+    else:
+        pruned_top = pruned_df.sort_values('value', ascending=False).head(5)
+        display_df = pruned_top[['number', 'value', 'params_hidden_dim', 'params_lr', 'params_dropout']].rename(
+            columns={'value': 'pearson_r'}
+        )
+        print(display_df)
 
 
 if __name__ == "__main__":
