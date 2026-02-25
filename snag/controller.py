@@ -30,14 +30,8 @@ class SimpleNASController(torch.nn.Module):
         self.is_cuda = cuda
 
         # set hyperparameters
-        if args and args.softmax_temperature:
-            self.softmax_temperature = args.softmax_temperature
-        else:
-            self.softmax_temperature = softmax_temperature
-        if args and args.tanh_c:
-            self.tanh_c = args.tanh_c
-        else:
-            self.tanh_c = tanh_c
+        self.softmax_temperature = getattr(args, "softmax_temperature", softmax_temperature)
+        self.tanh_c = getattr(args, "tanh_c", tanh_c)
 
         # build encoder
         self.num_tokens = []

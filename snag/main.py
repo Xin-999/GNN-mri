@@ -66,6 +66,8 @@ def build_args():
     parser.add_argument("--controller_hid", type=int, default=100)
     parser.add_argument("--controller_optim", type=str, default="adam")
     parser.add_argument("--controller_grad_clip", type=float, default=0)
+    parser.add_argument("--softmax_temperature", type=float, default=5.0)
+    parser.add_argument("--tanh_c", type=float, default=2.5)
 
     parser.add_argument("--entropy_mode", type=str, default="reward")
     parser.add_argument("--entropy_coeff", type=float, default=1e-4)

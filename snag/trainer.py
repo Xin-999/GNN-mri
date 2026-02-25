@@ -73,8 +73,8 @@ class Trainer(object):
                 val_score, metrics = self.submodel_manager.evaluate(gnn)
             else:
                 train_result = self.submodel_manager.train(gnn, evaluate_test=False)
-                val_score = train_result[\"val_score\"]
-                metrics = train_result[\"val_metrics\"]
+                val_score = train_result["val_score"]
+                metrics = train_result["val_metrics"]
             rewards.append(val_score)
             self.history.append({
                 "actions": gnn,
